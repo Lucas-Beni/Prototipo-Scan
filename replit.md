@@ -1,27 +1,70 @@
 # Prototipo-Scan
 
 ## Project Overview
-This is a GitHub import of the Prototipo-Scan repository. The repository contains only a README file with no source code or application logic.
+API de busca de imagens por similaridade usando CLIP (Contrastive Language-Image Pre-Training) e FAISS (Facebook AI Similarity Search).
 
-## Current State
-- **Date imported**: November 27, 2025
-- **Repository contents**: README.md only
-- **Status**: Empty project - no application code to run
+## Funcionalidades
+- Carrega modelo CLIP ViT-B/32 para geração de embeddings de imagens
+- Indexa automaticamente todas as imagens na pasta `images/`
+- Busca por similaridade de cosseno usando FAISS
+- Retorna a imagem mais similar com score de similaridade
 
-## Project Structure
-The repository appears to be either:
-1. A placeholder for a future scanning prototype application
-2. A newly initialized repository without code yet
-3. An incomplete clone
+## Estrutura do Projeto
+```
+├── main.py           # Rotas da API Flask
+├── clip_engine.py    # Carregamento do modelo CLIP e geração de embeddings
+├── indexer.py        # Indexação FAISS e mapeamento de imagens
+├── utils.py          # Funções auxiliares
+├── images/           # Pasta com imagens para indexar
+├── requirements.txt  # Dependências Python
+└── replit.md         # Este arquivo
+```
 
-## Next Steps
-To make this a functional project, you would need to:
-1. Define what kind of scanning application this should be (document scanner, QR code scanner, barcode scanner, etc.)
-2. Choose a technology stack (web app, mobile app, desktop app)
-3. Implement the core functionality
-4. Add dependencies and build configuration
+## Endpoints da API
 
-## Notes
-- No workflows configured (no code to run)
-- No dependencies installed (no package files found)
-- No database required (no application logic)
+### GET /
+Retorna informações sobre a API e lista de imagens indexadas.
+
+### POST /search
+Busca a imagem mais similar. Envie uma imagem no campo `image` (form-data).
+
+**Resposta:**
+```json
+{
+  "match_image": "nome_do_arquivo.jpg",
+  "similarity": 0.85,
+  "percentage": 85
+}
+```
+
+### GET /health
+Health check da API.
+
+### POST /reindex
+Força reindexação das imagens.
+
+## Como Usar
+
+1. Adicione imagens à pasta `images/`
+2. Inicie o servidor (workflow automático)
+3. Faça uma requisição POST para `/search` com uma imagem
+4. Receba o resultado com a imagem mais similar
+
+### Exemplo com curl:
+```bash
+curl -X POST -F "image=@sua_imagem.jpg" http://localhost:5000/search
+```
+
+## Tecnologias
+- Python 3.11
+- Flask (API REST)
+- CLIP (OpenAI) - Embeddings de imagens
+- FAISS (Facebook) - Busca por similaridade vetorial
+- PyTorch (CPU) - Backend para CLIP
+- Pillow - Processamento de imagens
+
+## Notas Técnicas
+- O modelo CLIP é carregado na inicialização do servidor
+- Os embeddings são normalizados para uso com similaridade de cosseno
+- FAISS usa IndexFlatIP (Inner Product) com vetores normalizados
+- Otimizado para CPU (não requer GPU)

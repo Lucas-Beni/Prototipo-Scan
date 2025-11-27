@@ -28,6 +28,10 @@ class ImageIndexer:
         """
         print("[Indexer] Iniciando indexação...")
         
+        self.id_to_filename = {}
+        self.embeddings = None
+        self.index = None
+        
         self.clip_engine = get_clip_engine()
         
         image_files = get_image_files(self.images_folder)
@@ -50,8 +54,9 @@ class ImageIndexer:
                 image = load_image_from_path(full_path)
                 embedding = self.clip_engine.generate_embedding(image)
                 
+                faiss_idx = len(embeddings_list)
                 embeddings_list.append(embedding)
-                self.id_to_filename[idx] = filename
+                self.id_to_filename[faiss_idx] = filename
                 
             except Exception as e:
                 print(f"[Indexer] Erro ao processar {filename}: {e}")
