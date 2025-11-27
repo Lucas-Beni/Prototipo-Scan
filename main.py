@@ -1,8 +1,10 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template, send_from_directory
 from indexer import get_indexer
 from utils import load_image_from_bytes, validate_image_file
+import os
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='static', template_folder='templates')
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
 
 indexer = None
 
@@ -18,10 +20,44 @@ def ensure_initialized():
         indexer.initialize()
 
 
+@app.after_request
+def add_cache_control(response):
+    """
+    Desabilita cache para evitar problemas com atualizações.
+    """
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
+
+
 @app.route('/')
 def index():
     """
-    Rota principal - retorna informações sobre a API.
+    Rota principal - retorna a interface visual ou JSON da API.
+    """
+    if request.accept_mimetypes.best == 'application/json':
+        indexed_count = indexer.get_indexed_count() if indexer and indexer.is_initialized else 0
+        indexed_files = indexer.get_all_indexed_files() if indexer and indexer.is_initialized else []
+        
+        return jsonify({
+            "api": "Prototipo-Scan API",
+            "version": "1.0.0",
+            "description": "API de busca de imagens por similaridade usando CLIP e FAISS",
+            "endpoints": {
+                "POST /search": "Busca a imagem mais similar. Envie uma imagem no campo 'image'."
+            },
+            "indexed_images": indexed_count,
+            "indexed_files": indexed_files
+        })
+    
+    return render_template('index.html')
+
+
+@app.route('/api')
+def api_info():
+    """
+    Rota da API - retorna informações sobre a API em JSON.
     """
     indexed_count = indexer.get_indexed_count() if indexer and indexer.is_initialized else 0
     indexed_files = indexer.get_all_indexed_files() if indexer and indexer.is_initialized else []
@@ -36,6 +72,14 @@ def index():
         "indexed_images": indexed_count,
         "indexed_files": indexed_files
     })
+
+
+@app.route('/images/<path:filename>')
+def serve_image(filename):
+    """
+    Serve imagens da pasta images/.
+    """
+    return send_from_directory('images', filename)
 
 
 @app.route('/search', methods=['POST'])
