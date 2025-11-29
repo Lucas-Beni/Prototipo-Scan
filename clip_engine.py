@@ -1,81 +1,68 @@
-import torch
-import clip
-from PIL import Image
+import base64
+import requests
 import numpy as np
-from typing import Union
+from PIL import Image
+from io import BytesIO
+import os
+from dotenv import load_dotenv
 
+load_dotenv()
+
+HF_API_KEY = os.getenv("HF_API_KEY")
+
+HF_MODEL = "sentence-transformers/clip-ViT-B-32"
+HF_URL = f"https://router.huggingface.co/pipeline/feature-extraction/{HF_MODEL}"
 
 class CLIPEngine:
-    """
-    Motor CLIP para geração de embeddings de imagens.
-    Usa ViT-B/32 por padrão, otimizado para CPU.
-    """
-    
-    def __init__(self, model_name: str = "ViT-B/32"):
-        self.device = "cpu"
-        print(f"[CLIPEngine] Carregando modelo {model_name} no dispositivo: {self.device}")
-        
-        self.model, self.preprocess = clip.load(model_name, device=self.device)
-        self.model.eval()
-        
-        self.embedding_dim = self.model.visual.output_dim
-        print(f"[CLIPEngine] Modelo carregado! Dimensão do embedding: {self.embedding_dim}")
-    
-    def get_embedding_dimension(self) -> int:
-        """
-        Retorna a dimensão dos vetores de embedding.
-        """
-        return self.embedding_dim
-    
-    def generate_embedding(self, image: Union[Image.Image, str]) -> np.ndarray:
-        """
-        Gera embedding vetorial para uma imagem.
-        
-        Args:
-            image: Objeto PIL Image ou caminho para arquivo de imagem
-            
-        Returns:
-            Vetor numpy normalizado de embedding
-        """
-        if isinstance(image, str):
-            image = Image.open(image).convert('RGB')
-        
-        image_input = self.preprocess(image).unsqueeze(0).to(self.device)
-        
-        with torch.no_grad():
-            image_features = self.model.encode_image(image_input)
-            image_features = image_features / image_features.norm(dim=-1, keepdim=True)
-        
-        embedding = image_features.cpu().numpy().astype(np.float32)
-        return embedding.squeeze(0)
-    
-    def compute_cosine_similarity(self, embedding1: np.ndarray, embedding2: np.ndarray) -> float:
-        """
-        Calcula a similaridade de cosseno entre dois embeddings.
-        Como os embeddings já são normalizados, o produto escalar é igual à similaridade de cosseno.
-        
-        Args:
-            embedding1: Primeiro vetor de embedding
-            embedding2: Segundo vetor de embedding
-            
-        Returns:
-            Valor de similaridade entre 0 e 1
-        """
-        embedding1_norm = embedding1 / np.linalg.norm(embedding1)
-        embedding2_norm = embedding2 / np.linalg.norm(embedding2)
-        
-        similarity = np.dot(embedding1_norm, embedding2_norm)
-        
-        return float(np.clip(similarity, 0.0, 1.0))
+    def __init__(self):
+        if not HF_API_KEY:
+            raise ValueError("Você precisa definir a variável de ambiente HF_API_KEY.")
+        print("[CLIPEngine] Usando HuggingFace API:", HF_URL)
+
+    def get_embedding_dimension(self):
+        return 512  # CLIP padrão
+
+    def generate_embedding(self, image):
+
+        try:
+            # Converte imagem para base64
+            buffered = BytesIO()
+            image.save(buffered, format="PNG")
+            img_bytes = buffered.getvalue()
+
+            encoded_image = base64.b64encode(img_bytes).decode("utf-8")
+
+            payload = {
+                "inputs": {
+                    "image": encoded_image
+                }
+            }
+
+            headers = {
+                "Authorization": f"Bearer {HF_API_KEY}",
+                "Content-Type": "application/json"
+            }
+
+            response = requests.post(HF_URL, headers=headers, json=payload)
+
+            if response.status_code != 200:
+                raise RuntimeError(
+                    f"Erro HuggingFace {response.status_code}: {response.text}"
+                )
+
+            data = response.json()
+
+            emb = np.array(data, dtype=np.float32)
+            emb = emb / np.linalg.norm(emb)
+            return emb
+
+        except Exception as e:
+            raise RuntimeError(f"Erro ao gerar embedding via HuggingFace: {e}")
 
 
 _engine_instance = None
 
-
-def get_clip_engine() -> CLIPEngine:
-    """
-    Retorna instância singleton do CLIPEngine.
-    """
+def get_clip_engine():
     global _engine_instance
     if _engine_instance is None:
         _engine_instance = CLIPEngine()

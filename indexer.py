@@ -53,6 +53,10 @@ class ImageIndexer:
                 
                 image = load_image_from_path(full_path)
                 embedding = self.clip_engine.generate_embedding(image)
+
+                embedding = embedding / np.linalg.norm(embedding)
+
+                embedding = embedding.astype(np.float32)
                 
                 faiss_idx = len(embeddings_list)
                 embeddings_list.append(embedding)
@@ -99,6 +103,7 @@ class ImageIndexer:
             return (None, 0.0, 0)
         
         query_embedding = self.clip_engine.generate_embedding(query_image)
+        query_embedding = query_embedding / np.linalg.norm(query_embedding)
         query_embedding = query_embedding.reshape(1, -1).astype(np.float32)
         
         faiss.normalize_L2(query_embedding)
