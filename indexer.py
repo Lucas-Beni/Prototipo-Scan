@@ -16,6 +16,7 @@ class ImageIndexer:
         self.image_id_to_category_id: Dict[int, int] = {}
         self.embeddings: Optional[np.ndarray] = None
         self.category_embeddings: Dict[int, np.ndarray] = {}
+        self.category_image_embeddings: Dict[int, np.ndarray] = {}
         self.is_initialized = False
     
     def initialize_from_db(self, images: list, categories: list = None) -> bool:
@@ -81,9 +82,32 @@ class ImageIndexer:
         faiss.normalize_L2(self.embeddings)
         self.index.add(self.embeddings)
         
+        self._compute_category_image_averages(embeddings_list, images)
+        
         print(f"[Indexer] Índice FAISS criado com {self.index.ntotal} vetores")
         self.is_initialized = True
         return True
+    
+    def _compute_category_image_averages(self, embeddings_list, images):
+        print("[Indexer] Calculando embeddings médios por categoria...")
+        category_embeddings_map: Dict[int, List[np.ndarray]] = {}
+        
+        for idx, image_record in enumerate(images):
+            if idx < len(embeddings_list):
+                cat_id = image_record.category_id
+                if cat_id not in category_embeddings_map:
+                    category_embeddings_map[cat_id] = []
+                category_embeddings_map[cat_id].append(embeddings_list[idx])
+        
+        self.category_image_embeddings = {}
+        for cat_id, emb_list in category_embeddings_map.items():
+            if emb_list:
+                avg_embedding = np.mean(emb_list, axis=0).astype(np.float32)
+                norm = np.linalg.norm(avg_embedding)
+                if norm > 0:
+                    avg_embedding = avg_embedding / norm
+                self.category_image_embeddings[cat_id] = avg_embedding
+                print(f"[Indexer] Embedding médio calculado para categoria {cat_id} ({len(emb_list)} imagens)")
     
     def _initialize_category_embeddings(self, categories):
         print("[Indexer] Gerando embeddings das categorias com modelo multilíngue...")
@@ -163,6 +187,7 @@ class ImageIndexer:
         self._query_text_embedding = None
         self._zero_shot_scores = None
         self._category_id_map = None
+        self._category_scores = None
         
         query_embedding = self.clip_service.generate_image_embedding(query_image)
         query_embedding = query_embedding / np.linalg.norm(query_embedding)
@@ -188,41 +213,19 @@ class ImageIndexer:
                 continue
             
             category_similarity = 0.0
-            if image_record.category_id in self.category_embeddings:
-                if not hasattr(self, '_zero_shot_scores') or self._zero_shot_scores is None:
-                    category_descriptions = []
-                    category_id_map = {}
-                    for cat_id, cat_emb in self.category_embeddings.items():
-                        cat_record = get_image_by_id_func(image_id)
-                        if cat_record and cat_record.category:
-                            desc = cat_record.category.description
-                            if desc and desc not in category_descriptions:
-                                category_descriptions.append(desc)
-                                category_id_map[desc] = cat_id
+            if image_record.category_id in self.category_image_embeddings:
+                if not hasattr(self, '_category_scores') or self._category_scores is None:
+                    self._category_scores = {}
+                    query_flat = query_embedding.flatten()
                     
-                    if not category_descriptions:
-                        from models import Category
-                        categories = Category.query.all()
-                        for cat in categories:
-                            if cat.description:
-                                category_descriptions.append(cat.description)
-                                category_id_map[cat.description] = cat.id
+                    for cat_id, cat_avg_emb in self.category_image_embeddings.items():
+                        sim = float(np.dot(query_flat, cat_avg_emb.flatten()))
+                        sim = max(0.0, min(1.0, sim))
+                        self._category_scores[cat_id] = sim
                     
-                    if category_descriptions:
-                        print(f"[Indexer] Classificando imagem entre categorias: {category_descriptions}")
-                        self._zero_shot_scores = self.clip_service.zero_shot_classify(query_image, category_descriptions)
-                        self._category_id_map = category_id_map
-                        if self._zero_shot_scores:
-                            print(f"[Indexer] Scores zero-shot: {self._zero_shot_scores}")
-                    else:
-                        self._zero_shot_scores = {}
-                        self._category_id_map = {}
+                    print(f"[Indexer] Scores por categoria: {self._category_scores}")
                 
-                if self._zero_shot_scores and self._category_id_map:
-                    for desc, cat_id in self._category_id_map.items():
-                        if cat_id == image_record.category_id:
-                            category_similarity = self._zero_shot_scores.get(desc, 0.0)
-                            break
+                category_similarity = self._category_scores.get(image_record.category_id, 0.0)
             
             combined_score = (1 - category_weight) * image_similarity + category_weight * category_similarity
             
