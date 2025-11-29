@@ -11,7 +11,7 @@ HF_API_KEY = os.getenv("HF_API_KEY")
 VIT_MODEL = "google/vit-base-patch16-224"
 VIT_URL = f"https://router.huggingface.co/hf-inference/models/{VIT_MODEL}"
 
-TEXT_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+TEXT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 TEXT_EMBEDDING_URL = f"https://router.huggingface.co/hf-inference/models/{TEXT_EMBEDDING_MODEL}"
 
 BLIP_MODEL = "Salesforce/blip-image-captioning-base"

@@ -86,19 +86,17 @@ class ImageIndexer:
         return True
     
     def _initialize_category_embeddings(self, categories):
-        print("[Indexer] Gerando embeddings das categorias...")
+        print("[Indexer] Gerando embeddings das categorias com modelo multilíngue...")
         for category in categories:
             if category.description:
                 try:
-                    existing_embedding = category.get_embedding()
-                    if existing_embedding is not None:
-                        self.category_embeddings[category.id] = existing_embedding
-                        print(f"[Indexer] Usando embedding existente para categoria: {category.name}")
-                    else:
-                        embedding = self.clip_service.generate_text_embedding(category.description)
-                        self.category_embeddings[category.id] = embedding
-                        category.set_embedding(embedding)
-                        print(f"[Indexer] Embedding gerado para categoria: {category.name}")
+                    embedding = self.clip_service.generate_text_embedding(category.description)
+                    norm = np.linalg.norm(embedding)
+                    if norm > 0:
+                        embedding = embedding / norm
+                    self.category_embeddings[category.id] = embedding
+                    category.set_embedding(embedding)
+                    print(f"[Indexer] Embedding regenerado para categoria: {category.name} (descrição: {category.description})")
                 except Exception as e:
                     print(f"[Indexer] Erro ao gerar embedding para categoria {category.name}: {e}")
     
@@ -109,6 +107,9 @@ class ImageIndexer:
         if category.description:
             try:
                 embedding = self.clip_service.generate_text_embedding(category.description)
+                norm = np.linalg.norm(embedding)
+                if norm > 0:
+                    embedding = embedding / norm
                 self.category_embeddings[category.id] = embedding
                 category.set_embedding(embedding)
                 print(f"[Indexer] Embedding atualizado para categoria: {category.name}")
@@ -190,13 +191,22 @@ class ImageIndexer:
                 if not hasattr(self, '_query_text_embedding') or self._query_text_embedding is None:
                     query_caption = self.clip_service.generate_image_caption(query_image)
                     if query_caption:
-                        self._query_text_embedding = self.clip_service.generate_text_embedding(query_caption)
-                        self._query_text_embedding = self._query_text_embedding / np.linalg.norm(self._query_text_embedding)
+                        query_caption_pt = self.clip_service.translate_to_portuguese(query_caption)
+                        print(f"[Indexer] Caption traduzido: {query_caption} -> {query_caption_pt}")
+                        self._query_text_embedding = self.clip_service.generate_text_embedding(query_caption_pt)
+                        norm = np.linalg.norm(self._query_text_embedding)
+                        if norm > 0:
+                            self._query_text_embedding = self._query_text_embedding / norm
                     else:
                         self._query_text_embedding = None
                 
                 if self._query_text_embedding is not None:
-                    category_similarity = float(np.dot(self._query_text_embedding.flatten(), cat_embedding.flatten()))
+                    cat_norm = np.linalg.norm(cat_embedding)
+                    if cat_norm > 0:
+                        cat_embedding_normalized = cat_embedding / cat_norm
+                    else:
+                        cat_embedding_normalized = cat_embedding
+                    category_similarity = float(np.dot(self._query_text_embedding.flatten(), cat_embedding_normalized.flatten()))
                     category_similarity = max(0.0, min(1.0, category_similarity))
             
             combined_score = (1 - category_weight) * image_similarity + category_weight * category_similarity
