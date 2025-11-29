@@ -74,6 +74,9 @@
                             <span class="category-label">Categoria:</span>
                             <span class="category-name" id="categoryName">-</span>
                         </div>
+                        <div class="category-description" id="categoryDescription" style="display: none;">
+                            <span class="description-text" id="categoryDescText"></span>
+                        </div>
                         <div class="similarity-meter">
                             <div class="similarity-bar" id="similarityBar"></div>
                         </div>
@@ -83,6 +86,23 @@
                         </div>
                         <p class="match-filename">Arquivo: <span id="matchFilename">-</span></p>
                     </div>
+                </div>
+
+                <div class="explanation-section" id="explanationSection" style="display: none;">
+                    <h3>Por que esta imagem foi escolhida?</h3>
+                    <div class="explanation-card">
+                        <svg class="explanation-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                            <line x1="12" y1="17" x2="12.01" y2="17"/>
+                        </svg>
+                        <p id="explanationText"></p>
+                    </div>
+                </div>
+
+                <div class="alternatives-section" id="alternativesSection" style="display: none;">
+                    <h3>Outras possibilidades</h3>
+                    <div class="alternatives-grid" id="alternativesGrid"></div>
                 </div>
             </section>
 
@@ -112,12 +132,16 @@
                         <span class="stat-value" id="indexedImages">0</span>
                         <span class="stat-label">Indexadas</span>
                     </div>
+                    <div class="stat-card">
+                        <span class="stat-value" id="categoriesWithEmbeddings">0</span>
+                        <span class="stat-label">Categorias com IA</span>
+                    </div>
                 </div>
             </section>
         </main>
 
         <footer>
-            <p>Desenvolvido com CLIP + FAISS</p>
+            <p>Desenvolvido com CLIP + FAISS + BLIP</p>
         </footer>
     </div>
 
@@ -241,13 +265,50 @@
                 if (data.category) {
                     document.getElementById('categoryName').textContent = data.category.name;
                     document.getElementById('categoryBadge').style.display = 'flex';
+                    
+                    if (data.category.description) {
+                        document.getElementById('categoryDescText').textContent = data.category.description;
+                        document.getElementById('categoryDescription').style.display = 'block';
+                    } else {
+                        document.getElementById('categoryDescription').style.display = 'none';
+                    }
                 } else {
                     document.getElementById('categoryBadge').style.display = 'none';
+                    document.getElementById('categoryDescription').style.display = 'none';
                 }
                 
                 const percentage = data.percentage;
                 document.getElementById('similarityValue').textContent = `${percentage}%`;
                 document.getElementById('similarityBar').style.width = `${percentage}%`;
+                
+                if (data.explanation) {
+                    document.getElementById('explanationText').textContent = data.explanation;
+                    document.getElementById('explanationSection').style.display = 'block';
+                } else {
+                    document.getElementById('explanationSection').style.display = 'none';
+                }
+                
+                if (data.alternatives && data.alternatives.length > 0) {
+                    const grid = document.getElementById('alternativesGrid');
+                    grid.innerHTML = '';
+                    
+                    data.alternatives.forEach(alt => {
+                        const card = document.createElement('div');
+                        card.className = 'alternative-card';
+                        card.innerHTML = `
+                            <img src="/images/${alt.filename}" alt="${alt.filename}">
+                            <div class="alternative-info">
+                                <span class="alt-category">${alt.category_name}</span>
+                                <span class="alt-score">${alt.combined_score}%</span>
+                            </div>
+                        `;
+                        grid.appendChild(card);
+                    });
+                    
+                    document.getElementById('alternativesSection').style.display = 'block';
+                } else {
+                    document.getElementById('alternativesSection').style.display = 'none';
+                }
                 
                 resultSection.style.display = 'block';
                 errorSection.style.display = 'none';
@@ -269,6 +330,7 @@
                     document.getElementById('totalCategories').textContent = data.total_categories || 0;
                     document.getElementById('totalImages').textContent = data.total_images || 0;
                     document.getElementById('indexedImages').textContent = data.indexed_images || 0;
+                    document.getElementById('categoriesWithEmbeddings').textContent = data.categories_with_embeddings || 0;
                 } catch (error) {
                     console.error('Erro ao carregar estatísticas:', error);
                 }

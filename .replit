@@ -1,4 +1,4 @@
-modules = ["web", "python-3.11"]
+modules = ["web", "python-3.11", "postgresql-16"]
 [agent]
 expertMode = true
 
@@ -43,7 +43,7 @@ localPort = 37419
 externalPort = 3002
 
 [[ports]]
-localPort = 41939
+localPort = 42319
 externalPort = 3001
 
 [deployment]

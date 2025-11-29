@@ -32,7 +32,9 @@ def initialize_indexer():
     indexer = get_indexer()
     with app.app_context():
         images = Image.query.all()
-        indexer.initialize_from_db(images)
+        categories = Category.query.all()
+        indexer.initialize_from_db(images, categories)
+        db.session.commit()
 
 
 @app.before_request
@@ -78,6 +80,7 @@ def get_categories():
 
 @app.route('/api/categories', methods=['POST'])
 def create_category():
+    global indexer
     data = request.get_json()
     
     if not data or not data.get('name'):
@@ -94,6 +97,10 @@ def create_category():
     db.session.add(category)
     db.session.commit()
     
+    if indexer and indexer.is_initialized and description:
+        indexer.update_category_embedding(category)
+        db.session.commit()
+    
     return jsonify(category.to_dict()), 201
 
 
@@ -105,6 +112,7 @@ def get_category(category_id):
 
 @app.route('/api/categories/<int:category_id>', methods=['PUT'])
 def update_category(category_id):
+    global indexer
     category = Category.query.get_or_404(category_id)
     data = request.get_json()
     
@@ -118,10 +126,19 @@ def update_category(category_id):
             return jsonify({'error': 'Categoria com este nome já existe'}), 400
         category.name = name
     
+    description_changed = False
     if 'description' in data:
-        category.description = data['description'].strip()
+        new_description = data['description'].strip()
+        if category.description != new_description:
+            category.description = new_description
+            description_changed = True
     
     db.session.commit()
+    
+    if description_changed and indexer and indexer.is_initialized:
+        indexer.update_category_embedding(category)
+        db.session.commit()
+    
     return jsonify(category.to_dict())
 
 
@@ -235,6 +252,9 @@ def search():
             'message': 'O arquivo enviado está vazio'
         }), 400
     
+    category_weight = request.form.get('category_weight', type=float, default=0.3)
+    category_weight = max(0.0, min(1.0, category_weight))
+    
     try:
         image_bytes = file.read()
         
@@ -252,7 +272,8 @@ def search():
                 'message': 'Não há imagens indexadas. Adicione imagens primeiro.'
             }), 404
         
-        image_record, similarity, percentage = indexer.search(query_image, get_image_by_id)
+        result = indexer.search(query_image, get_image_by_id, top_k=5, category_weight=category_weight)
+        image_record, similarity, percentage, explanation, alternatives = result
         
         if image_record is None:
             return jsonify({
@@ -269,7 +290,9 @@ def search():
                 'id': image_record.category.id,
                 'name': image_record.category.name,
                 'description': image_record.category.description
-            }
+            },
+            'explanation': explanation,
+            'alternatives': alternatives
         })
         
     except Exception as e:
@@ -281,10 +304,15 @@ def search():
 
 @app.route('/api/stats')
 def stats():
+    categories_with_embeddings = 0
+    if indexer and indexer.is_initialized:
+        categories_with_embeddings = len(indexer.category_embeddings)
+    
     return jsonify({
         'indexed_images': indexer.get_indexed_count() if indexer and indexer.is_initialized else 0,
         'total_categories': Category.query.count(),
-        'total_images': Image.query.count()
+        'total_images': Image.query.count(),
+        'categories_with_embeddings': categories_with_embeddings
     })
 
 
@@ -320,6 +348,7 @@ if __name__ == '__main__':
         print("=" * 60)
         print("PROTOTIPO-SCAN API")
         print("Sistema de busca de imagens com categorias")
+        print("Agora com explicações e contexto de categorias!")
         print("=" * 60)
         
         initialize_indexer()
@@ -327,6 +356,7 @@ if __name__ == '__main__':
         print("=" * 60)
         print(f"Imagens indexadas: {indexer.get_indexed_count()}")
         print(f"Categorias: {Category.query.count()}")
+        print(f"Categorias com embeddings: {len(indexer.category_embeddings)}")
         print("Servidor iniciando em http://0.0.0.0:5000")
         print("=" * 60)
     

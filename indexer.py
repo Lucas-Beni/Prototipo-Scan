@@ -2,7 +2,7 @@ import os
 import faiss
 import numpy as np
 from typing import Dict, List, Optional, Tuple
-from clip_engine import CLIPEngine, get_clip_engine
+from clip_service import CLIPService, get_clip_service
 from utils import load_image_from_path
 
 
@@ -10,24 +10,31 @@ class ImageIndexer:
     
     def __init__(self, images_folder: str = "images"):
         self.images_folder = images_folder
-        self.clip_engine: Optional[CLIPEngine] = None
+        self.clip_service: Optional[CLIPService] = None
         self.index: Optional[faiss.IndexFlatIP] = None
         self.id_to_image_id: Dict[int, int] = {}
+        self.image_id_to_category_id: Dict[int, int] = {}
         self.embeddings: Optional[np.ndarray] = None
+        self.category_embeddings: Dict[int, np.ndarray] = {}
         self.is_initialized = False
     
-    def initialize_from_db(self, images: list) -> bool:
+    def initialize_from_db(self, images: list, categories: list = None) -> bool:
         print("[Indexer] Iniciando indexação a partir do banco de dados...")
         
         self.id_to_image_id = {}
+        self.image_id_to_category_id = {}
         self.embeddings = None
         self.index = None
+        self.category_embeddings = {}
         
-        self.clip_engine = get_clip_engine()
+        self.clip_service = get_clip_service()
+        
+        if categories:
+            self._initialize_category_embeddings(categories)
         
         if not images:
             print("[Indexer] Nenhuma imagem encontrada no banco de dados")
-            embedding_dim = self.clip_engine.get_embedding_dimension()
+            embedding_dim = self.clip_service.get_image_embedding_dimension()
             self.index = faiss.IndexFlatIP(embedding_dim)
             self.is_initialized = True
             return True
@@ -46,13 +53,14 @@ class ImageIndexer:
                     continue
                 
                 image = load_image_from_path(full_path)
-                embedding = self.clip_engine.generate_embedding(image)
+                embedding = self.clip_service.generate_image_embedding(image)
                 embedding = embedding / np.linalg.norm(embedding)
                 embedding = embedding.astype(np.float32)
                 
                 faiss_idx = len(embeddings_list)
                 embeddings_list.append(embedding)
                 self.id_to_image_id[faiss_idx] = image_record.id
+                self.image_id_to_category_id[image_record.id] = image_record.category_id
                 
             except Exception as e:
                 print(f"[Indexer] Erro ao processar {image_record.filename}: {e}")
@@ -60,7 +68,7 @@ class ImageIndexer:
         
         if not embeddings_list:
             print("[Indexer] Nenhuma imagem foi processada com sucesso")
-            embedding_dim = self.clip_engine.get_embedding_dimension()
+            embedding_dim = self.clip_service.get_image_embedding_dimension()
             self.index = faiss.IndexFlatIP(embedding_dim)
             self.is_initialized = True
             return True
@@ -77,8 +85,45 @@ class ImageIndexer:
         self.is_initialized = True
         return True
     
+    def _initialize_category_embeddings(self, categories):
+        print("[Indexer] Gerando embeddings das categorias...")
+        for category in categories:
+            if category.description:
+                try:
+                    existing_embedding = category.get_embedding()
+                    if existing_embedding is not None:
+                        self.category_embeddings[category.id] = existing_embedding
+                        print(f"[Indexer] Usando embedding existente para categoria: {category.name}")
+                    else:
+                        embedding = self.clip_service.generate_text_embedding(category.description)
+                        self.category_embeddings[category.id] = embedding
+                        category.set_embedding(embedding)
+                        print(f"[Indexer] Embedding gerado para categoria: {category.name}")
+                except Exception as e:
+                    print(f"[Indexer] Erro ao gerar embedding para categoria {category.name}: {e}")
+    
+    def update_category_embedding(self, category):
+        if not self.clip_service:
+            self.clip_service = get_clip_service()
+        
+        if category.description:
+            try:
+                embedding = self.clip_service.generate_text_embedding(category.description)
+                self.category_embeddings[category.id] = embedding
+                category.set_embedding(embedding)
+                print(f"[Indexer] Embedding atualizado para categoria: {category.name}")
+                return True
+            except Exception as e:
+                print(f"[Indexer] Erro ao atualizar embedding da categoria {category.name}: {e}")
+                return False
+        else:
+            if category.id in self.category_embeddings:
+                del self.category_embeddings[category.id]
+            category.set_embedding(None)
+        return True
+    
     def add_single_image(self, image_record) -> bool:
-        if not self.is_initialized or self.clip_engine is None:
+        if not self.is_initialized or self.clip_service is None:
             return False
         
         try:
@@ -89,7 +134,7 @@ class ImageIndexer:
                 return False
             
             image = load_image_from_path(full_path)
-            embedding = self.clip_engine.generate_embedding(image)
+            embedding = self.clip_service.generate_image_embedding(image)
             embedding = embedding / np.linalg.norm(embedding)
             embedding = embedding.reshape(1, -1).astype(np.float32)
             
@@ -98,6 +143,7 @@ class ImageIndexer:
             faiss_idx = self.index.ntotal
             self.index.add(embedding)
             self.id_to_image_id[faiss_idx] = image_record.id
+            self.image_id_to_category_id[image_record.id] = image_record.category_id
             
             print(f"[Indexer] Imagem adicionada ao índice: {image_record.filename}")
             return True
@@ -106,38 +152,104 @@ class ImageIndexer:
             print(f"[Indexer] Erro ao adicionar imagem {image_record.filename}: {e}")
             return False
     
-    def search(self, query_image, get_image_by_id_func) -> Tuple[Optional[dict], float, int]:
+    def search(self, query_image, get_image_by_id_func, top_k: int = 5, category_weight: float = 0.3) -> Tuple[Optional[dict], float, int, str, List[dict]]:
         if not self.is_initialized:
             raise RuntimeError("Indexador não foi inicializado.")
         
         if self.index.ntotal == 0:
-            return (None, 0.0, 0)
+            return (None, 0.0, 0, "Nenhuma imagem no índice", [])
         
-        query_embedding = self.clip_engine.generate_embedding(query_image)
+        query_embedding = self.clip_service.generate_image_embedding(query_image)
         query_embedding = query_embedding / np.linalg.norm(query_embedding)
         query_embedding = query_embedding.reshape(1, -1).astype(np.float32)
         
         faiss.normalize_L2(query_embedding)
         
-        distances, indices = self.index.search(query_embedding, 1)
+        k = min(top_k, self.index.ntotal)
+        distances, indices = self.index.search(query_embedding, k)
         
-        best_idx = int(indices[0][0])
-        raw_similarity = float(distances[0][0])
+        candidates = []
+        for i in range(k):
+            faiss_idx = int(indices[0][i])
+            image_similarity = float(distances[0][i])
+            image_similarity = max(0.0, min(1.0, image_similarity))
+            
+            image_id = self.id_to_image_id.get(faiss_idx, None)
+            if image_id is None:
+                continue
+            
+            image_record = get_image_by_id_func(image_id)
+            if image_record is None:
+                continue
+            
+            category_similarity = 0.0
+            if image_record.category_id in self.category_embeddings:
+                cat_embedding = self.category_embeddings[image_record.category_id]
+                query_flat = query_embedding.flatten()
+                category_similarity = float(np.dot(query_flat, cat_embedding))
+                category_similarity = max(0.0, min(1.0, category_similarity))
+            
+            combined_score = (1 - category_weight) * image_similarity + category_weight * category_similarity
+            
+            candidates.append({
+                'image_record': image_record,
+                'image_similarity': image_similarity,
+                'category_similarity': category_similarity,
+                'combined_score': combined_score
+            })
         
-        similarity = max(0.0, min(1.0, raw_similarity))
-        percentage = int(round(similarity * 100))
+        if not candidates:
+            return (None, 0.0, 0, "Nenhuma correspondência encontrada", [])
         
-        image_id = self.id_to_image_id.get(best_idx, None)
+        candidates.sort(key=lambda x: x['combined_score'], reverse=True)
         
-        if image_id is None:
-            return (None, 0.0, 0)
+        best = candidates[0]
+        best_image = best['image_record']
+        best_similarity = best['combined_score']
+        percentage = int(round(best_similarity * 100))
         
-        image_record = get_image_by_id_func(image_id)
+        explanation = self._generate_explanation(
+            query_image, 
+            best_image, 
+            best['image_similarity'],
+            best['category_similarity']
+        )
         
-        if image_record is None:
-            return (None, 0.0, 0)
+        alternatives = []
+        for i, cand in enumerate(candidates[1:4]):
+            alternatives.append({
+                'image_id': cand['image_record'].id,
+                'filename': cand['image_record'].filename,
+                'category_name': cand['image_record'].category.name if cand['image_record'].category else "Sem categoria",
+                'combined_score': round(cand['combined_score'] * 100, 1),
+                'image_similarity': round(cand['image_similarity'] * 100, 1),
+                'category_similarity': round(cand['category_similarity'] * 100, 1)
+            })
         
-        return (image_record, similarity, percentage)
+        return (best_image, best_similarity, percentage, explanation, alternatives)
+    
+    def _generate_explanation(self, query_image, best_image, image_similarity, category_similarity):
+        try:
+            match_image = load_image_from_path(best_image.storage_path)
+            
+            category_name = best_image.category.name if best_image.category else "Sem categoria"
+            category_description = best_image.category.description if best_image.category else None
+            
+            combined_similarity = (image_similarity * 0.7) + (category_similarity * 0.3)
+            
+            explanation = self.clip_service.generate_explanation(
+                query_image,
+                match_image,
+                category_name,
+                category_description,
+                combined_similarity
+            )
+            
+            return explanation
+            
+        except Exception as e:
+            print(f"[Indexer] Erro ao gerar explicação: {e}")
+            return f"Imagem classificada com base na similaridade visual ({int(image_similarity * 100)}%)."
     
     def get_indexed_count(self) -> int:
         if self.index is None:
