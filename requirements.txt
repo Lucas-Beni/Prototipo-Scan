@@ -1,4 +1,6 @@
 flask
+faiss-cpu
 Pillow
+numpy
 requests
 python-dotenv
