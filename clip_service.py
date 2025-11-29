@@ -14,7 +14,7 @@ VIT_URL = f"https://router.huggingface.co/hf-inference/models/{VIT_MODEL}"
 TEXT_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 TEXT_EMBEDDING_URL = f"https://router.huggingface.co/hf-inference/models/{TEXT_EMBEDDING_MODEL}"
 
-BLIP_MODEL = "Salesforce/blip-image-captioning-large"
+BLIP_MODEL = "Salesforce/blip-image-captioning-base"
 BLIP_URL = f"https://router.huggingface.co/hf-inference/models/{BLIP_MODEL}"
 
 TRANSLATION_MODEL = "Helsinki-NLP/opus-mt-en-pt"
@@ -236,41 +236,61 @@ class CLIPService:
             print(f"[CLIPService] Erro na tradução: {e}")
             return text
 
-    def generate_explanation(self, query_image, match_image, category_name, category_description, similarity_score):
+    def generate_explanation(self, query_image, match_image, category_name, category_description, similarity_score, image_similarity=None, category_similarity=None):
         try:
             query_caption = self.generate_image_caption(query_image)
-            match_caption = self.generate_image_caption(match_image)
             
             if query_caption:
                 query_caption_pt = self.translate_to_portuguese(query_caption)
+                print(f"[CLIPService] Caption da imagem de busca: {query_caption} -> {query_caption_pt}")
             else:
-                query_caption_pt = "imagem de consulta"
-            
-            if match_caption:
-                match_caption_pt = self.translate_to_portuguese(match_caption)
-            else:
-                match_caption_pt = "imagem correspondente"
+                query_caption_pt = None
             
             similarity_pct = int(similarity_score * 100)
             
             explanation_parts = []
-            explanation_parts.append(f"A imagem enviada ({query_caption_pt}) foi comparada com as imagens cadastradas.")
-            explanation_parts.append(f"A melhor correspondência encontrada ({match_caption_pt}) pertence à categoria '{category_name}'.")
+            
+            if query_caption_pt:
+                explanation_parts.append(f"**O que foi detectado na sua imagem:** {query_caption_pt}.")
+            
+            explanation_parts.append(f"\n\n**Categoria escolhida:** {category_name}")
             
             if category_description:
-                explanation_parts.append(f"Esta categoria é definida como: {category_description}.")
+                explanation_parts.append(f"\n**Critério da categoria:** {category_description}")
+                
+                if query_caption_pt:
+                    explanation_parts.append(f"\n\n**Por que esta categoria?** A análise identificou que a imagem enviada ({query_caption_pt}) possui características que correspondem aos critérios definidos para a categoria '{category_name}' ({category_description}).")
+                else:
+                    explanation_parts.append(f"\n\n**Por que esta categoria?** A imagem foi classificada como '{category_name}' porque suas características visuais correspondem aos critérios: {category_description}.")
             
-            if similarity_pct >= 80:
-                explanation_parts.append(f"A similaridade visual de {similarity_pct}% indica alta correspondência entre as imagens.")
-            elif similarity_pct >= 60:
-                explanation_parts.append(f"A similaridade visual de {similarity_pct}% indica correspondência moderada.")
+            explanation_parts.append(f"\n\n**Pontuação de correspondência:** {similarity_pct}%")
+            
+            if image_similarity is not None and category_similarity is not None:
+                img_pct = int(image_similarity * 100)
+                cat_pct = int(category_similarity * 100)
+                explanation_parts.append(f"\n- Similaridade visual com imagens do banco: {img_pct}%")
+                explanation_parts.append(f"\n- Correspondência com a descrição da categoria: {cat_pct}%")
+                
+                if cat_pct >= 70:
+                    explanation_parts.append(f"\n\n**Conclusão:** Alta correspondência com os critérios da categoria '{category_name}'.")
+                elif cat_pct >= 40:
+                    explanation_parts.append(f"\n\n**Conclusão:** Correspondência moderada com os critérios da categoria '{category_name}'.")
+                else:
+                    explanation_parts.append(f"\n\n**Conclusão:** A classificação foi baseada principalmente na similaridade visual, pois a correspondência textual com a categoria foi baixa.")
             else:
-                explanation_parts.append(f"A similaridade visual de {similarity_pct}% sugere alguma semelhança, mas existem diferenças significativas.")
+                if similarity_pct >= 80:
+                    explanation_parts.append(f"\n\n**Conclusão:** Alta confiança na classificação como '{category_name}'.")
+                elif similarity_pct >= 60:
+                    explanation_parts.append(f"\n\n**Conclusão:** Confiança moderada na classificação como '{category_name}'.")
+                else:
+                    explanation_parts.append(f"\n\n**Conclusão:** Classificação com menor confiança. Recomenda-se verificação manual.")
             
-            return " ".join(explanation_parts)
+            return "".join(explanation_parts)
 
         except Exception as e:
             print(f"[CLIPService] Erro ao gerar explicação: {e}")
+            if category_description:
+                return f"**Categoria:** {category_name}\n**Critério:** {category_description}\n**Similaridade:** {int(similarity_score * 100)}%\n\nA imagem foi classificada nesta categoria com base nas características visuais detectadas."
             return f"Imagem classificada na categoria '{category_name}' com {int(similarity_score * 100)}% de similaridade."
 
 

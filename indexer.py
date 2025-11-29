@@ -252,13 +252,17 @@ class ImageIndexer:
                 match_image,
                 category_name,
                 category_description,
-                combined_similarity
+                combined_similarity,
+                image_similarity=image_similarity,
+                category_similarity=category_similarity
             )
             
             return explanation
             
         except Exception as e:
             print(f"[Indexer] Erro ao gerar explicação: {e}")
+            if best_image.category and best_image.category.description:
+                return f"**Categoria:** {best_image.category.name}\n**Critério:** {best_image.category.description}\n**Similaridade visual:** {int(image_similarity * 100)}%\n**Correspondência com categoria:** {int(category_similarity * 100)}%"
             return f"Imagem classificada com base na similaridade visual ({int(image_similarity * 100)}%)."
     
     def get_indexed_count(self) -> int:
