@@ -17,6 +17,7 @@ class ImageIndexer:
         self.embeddings: Optional[np.ndarray] = None
         self.category_embeddings: Dict[int, np.ndarray] = {}
         self.category_image_embeddings: Dict[int, np.ndarray] = {}
+        self.category_descriptions: Dict[int, str] = {}
         self.is_initialized = False
     
     def initialize_from_db(self, images: list, categories: list = None) -> bool:
@@ -27,6 +28,7 @@ class ImageIndexer:
         self.embeddings = None
         self.index = None
         self.category_embeddings = {}
+        self.category_descriptions = {}
         
         self.clip_service = get_clip_service()
         
@@ -109,11 +111,46 @@ class ImageIndexer:
                 self.category_image_embeddings[cat_id] = avg_embedding
                 print(f"[Indexer] Embedding médio calculado para categoria {cat_id} ({len(emb_list)} imagens)")
     
+    def _compute_category_text_scores(self, query_image) -> Dict[int, float]:
+        if not self.category_descriptions:
+            print("[Indexer] Nenhuma descrição de categoria disponível, usando scores neutros")
+            return {cat_id: 0.5 for cat_id in self.category_embeddings.keys()}
+        
+        try:
+            caption = self.clip_service.generate_image_caption(query_image)
+            print(f"[Indexer] Caption da imagem de busca: {caption}")
+            
+            if caption:
+                caption_embedding = self.clip_service.generate_text_embedding(caption)
+                caption_embedding = caption_embedding / np.linalg.norm(caption_embedding)
+                
+                scores = {}
+                for cat_id, description in self.category_descriptions.items():
+                    if cat_id in self.category_embeddings:
+                        cat_embedding = self.category_embeddings[cat_id]
+                        similarity = float(np.dot(caption_embedding, cat_embedding))
+                        similarity = max(0.0, min(1.0, (similarity + 1) / 2))
+                        scores[cat_id] = similarity
+                    else:
+                        scores[cat_id] = 0.5
+                
+                print(f"[Indexer] Scores de categoria por descrição textual: {scores}")
+                return scores
+            else:
+                print("[Indexer] Não foi possível gerar caption, usando scores neutros")
+                return {cat_id: 0.5 for cat_id in self.category_embeddings.keys()}
+                
+        except Exception as e:
+            print(f"[Indexer] Erro ao calcular scores de categoria: {e}")
+            return {cat_id: 0.5 for cat_id in self.category_embeddings.keys()}
+    
     def _initialize_category_embeddings(self, categories):
         print("[Indexer] Gerando embeddings das categorias com modelo multilíngue...")
+        self.category_descriptions = {}
         for category in categories:
             if category.description:
                 try:
+                    self.category_descriptions[category.id] = category.description
                     embedding = self.clip_service.generate_text_embedding(category.description)
                     norm = np.linalg.norm(embedding)
                     if norm > 0:
@@ -130,6 +167,7 @@ class ImageIndexer:
         
         if category.description:
             try:
+                self.category_descriptions[category.id] = category.description
                 embedding = self.clip_service.generate_text_embedding(category.description)
                 norm = np.linalg.norm(embedding)
                 if norm > 0:
@@ -144,6 +182,8 @@ class ImageIndexer:
         else:
             if category.id in self.category_embeddings:
                 del self.category_embeddings[category.id]
+            if category.id in self.category_descriptions:
+                del self.category_descriptions[category.id]
             category.set_embedding(None)
         return True
     
@@ -198,6 +238,8 @@ class ImageIndexer:
         k = min(top_k, self.index.ntotal)
         distances, indices = self.index.search(query_embedding, k)
         
+        category_text_scores = self._compute_category_text_scores(query_image)
+        
         candidates = []
         for i in range(k):
             faiss_idx = int(indices[0][i])
@@ -212,20 +254,7 @@ class ImageIndexer:
             if image_record is None:
                 continue
             
-            category_similarity = 0.0
-            if image_record.category_id in self.category_image_embeddings:
-                if not hasattr(self, '_category_scores') or self._category_scores is None:
-                    self._category_scores = {}
-                    query_flat = query_embedding.flatten()
-                    
-                    for cat_id, cat_avg_emb in self.category_image_embeddings.items():
-                        sim = float(np.dot(query_flat, cat_avg_emb.flatten()))
-                        sim = max(0.0, min(1.0, sim))
-                        self._category_scores[cat_id] = sim
-                    
-                    print(f"[Indexer] Scores por categoria: {self._category_scores}")
-                
-                category_similarity = self._category_scores.get(image_record.category_id, 0.0)
+            category_similarity = category_text_scores.get(image_record.category_id, 0.0)
             
             combined_score = (1 - category_weight) * image_similarity + category_weight * category_similarity
             
