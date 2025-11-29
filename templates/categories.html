@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gerenciar Categorias - Prototipo-Scan</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Prototipo-Scan</h1>
+            <p class="subtitle">Gerenciamento de Categorias</p>
+            <nav class="nav-menu">
+                <a href="/" class="nav-link">Buscar</a>
+                <a href="/categories" class="nav-link active">Categorias</a>
+                <a href="/upload" class="nav-link">Cadastrar Imagens</a>
+            </nav>
+        </header>
+
+        <main>
+            <section class="form-section">
+                <h2 id="formTitle">Nova Categoria</h2>
+                <form id="categoryForm">
+                    <input type="hidden" id="categoryId">
+                    <div class="form-group">
+                        <label for="categoryName">Nome da Categoria *</label>
+                        <input type="text" id="categoryName" placeholder="Ex: Leve, Médio, Pesado" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="categoryDescription">Descrição (opcional)</label>
+                        <input type="text" id="categoryDescription" placeholder="Descrição da categoria">
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary" id="submitBtn">
+                            <span class="btn-text">Salvar Categoria</span>
+                        </button>
+                        <button type="button" class="btn btn-secondary" id="cancelBtn" style="display: none;">
+                            Cancelar
+                        </button>
+                    </div>
+                </form>
+            </section>
+
+            <section class="list-section">
+                <h2>Categorias Cadastradas</h2>
+                <div class="categories-list" id="categoriesList">
+                    <p class="loading">Carregando categorias...</p>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>Desenvolvido com CLIP + FAISS</p>
+        </footer>
+    </div>
+
+    <div class="modal" id="deleteModal" style="display: none;">
+        <div class="modal-content">
+            <h3>Confirmar Exclusão</h3>
+            <p>Tem certeza que deseja excluir esta categoria? Todas as imagens associadas também serão excluídas.</p>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" id="cancelDeleteBtn">Cancelar</button>
+                <button class="btn btn-danger" id="confirmDeleteBtn">Excluir</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const categoryForm = document.getElementById('categoryForm');
+            const categoryId = document.getElementById('categoryId');
+            const categoryName = document.getElementById('categoryName');
+            const categoryDescription = document.getElementById('categoryDescription');
+            const formTitle = document.getElementById('formTitle');
+            const submitBtn = document.getElementById('submitBtn');
+            const cancelBtn = document.getElementById('cancelBtn');
+            const categoriesList = document.getElementById('categoriesList');
+            const deleteModal = document.getElementById('deleteModal');
+            const cancelDeleteBtn = document.getElementById('cancelDeleteBtn');
+            const confirmDeleteBtn = document.getElementById('confirmDeleteBtn');
+            
+            let categoryToDelete = null;
+
+            loadCategories();
+
+            categoryForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                
+                const name = categoryName.value.trim();
+                const description = categoryDescription.value.trim();
+                
+                if (!name) {
+                    alert('Nome da categoria é obrigatório');
+                    return;
+                }
+                
+                const isEditing = categoryId.value !== '';
+                const url = isEditing ? `/api/categories/${categoryId.value}` : '/api/categories';
+                const method = isEditing ? 'PUT' : 'POST';
+                
+                try {
+                    const response = await fetch(url, {
+                        method: method,
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name, description })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (response.ok) {
+                        resetForm();
+                        loadCategories();
+                    } else {
+                        alert(data.error || 'Erro ao salvar categoria');
+                    }
+                } catch (error) {
+                    alert('Erro de conexão. Tente novamente.');
+                }
+            });
+
+            cancelBtn.addEventListener('click', resetForm);
+            
+            cancelDeleteBtn.addEventListener('click', () => {
+                deleteModal.style.display = 'none';
+                categoryToDelete = null;
+            });
+            
+            confirmDeleteBtn.addEventListener('click', async () => {
+                if (!categoryToDelete) return;
+                
+                try {
+                    const response = await fetch(`/api/categories/${categoryToDelete}`, {
+                        method: 'DELETE'
+                    });
+                    
+                    if (response.ok) {
+                        loadCategories();
+                    } else {
+                        const data = await response.json();
+                        alert(data.error || 'Erro ao excluir categoria');
+                    }
+                } catch (error) {
+                    alert('Erro de conexão. Tente novamente.');
+                }
+                
+                deleteModal.style.display = 'none';
+                categoryToDelete = null;
+            });
+
+            async function loadCategories() {
+                try {
+                    const response = await fetch('/api/categories');
+                    const categories = await response.json();
+                    
+                    if (categories.length === 0) {
+                        categoriesList.innerHTML = '<p class="empty-message">Nenhuma categoria cadastrada</p>';
+                        return;
+                    }
+                    
+                    categoriesList.innerHTML = categories.map(cat => `
+                        <div class="category-card">
+                            <div class="category-info">
+                                <h3>${escapeHtml(cat.name)}</h3>
+                                ${cat.description ? `<p>${escapeHtml(cat.description)}</p>` : ''}
+                                <span class="category-count">${cat.image_count} imagem(ns)</span>
+                            </div>
+                            <div class="category-actions">
+                                <button class="btn btn-small btn-secondary" onclick="editCategory(${cat.id}, '${escapeHtml(cat.name)}', '${escapeHtml(cat.description || '')}')">
+                                    Editar
+                                </button>
+                                <button class="btn btn-small btn-danger" onclick="deleteCategory(${cat.id})">
+                                    Excluir
+                                </button>
+                            </div>
+                        </div>
+                    `).join('');
+                } catch (error) {
+                    categoriesList.innerHTML = '<p class="error-message">Erro ao carregar categorias</p>';
+                }
+            }
+
+            function resetForm() {
+                categoryId.value = '';
+                categoryName.value = '';
+                categoryDescription.value = '';
+                formTitle.textContent = 'Nova Categoria';
+                submitBtn.querySelector('.btn-text').textContent = 'Salvar Categoria';
+                cancelBtn.style.display = 'none';
+            }
+
+            window.editCategory = function(id, name, description) {
+                categoryId.value = id;
+                categoryName.value = name;
+                categoryDescription.value = description;
+                formTitle.textContent = 'Editar Categoria';
+                submitBtn.querySelector('.btn-text').textContent = 'Atualizar Categoria';
+                cancelBtn.style.display = 'inline-flex';
+                categoryName.focus();
+            };
+
+            window.deleteCategory = function(id) {
+                categoryToDelete = id;
+                deleteModal.style.display = 'flex';
+            };
+
+            function escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+        });
+    </script>
+</body>
+</html>

@@ -3,7 +3,7 @@ import faiss
 import numpy as np
 from typing import Dict, List, Optional, Tuple
 from clip_engine import CLIPEngine, get_clip_engine
-from utils import get_image_files, load_image_from_path
+from utils import load_image_from_path
 
 
 class ImageIndexer:
@@ -12,49 +12,50 @@ class ImageIndexer:
         self.images_folder = images_folder
         self.clip_engine: Optional[CLIPEngine] = None
         self.index: Optional[faiss.IndexFlatIP] = None
-        self.id_to_filename: Dict[int, str] = {}
+        self.id_to_image_id: Dict[int, int] = {}
         self.embeddings: Optional[np.ndarray] = None
         self.is_initialized = False
     
-    def initialize(self) -> bool:
-        print("[Indexer] Iniciando indexação...")
+    def initialize_from_db(self, images: list) -> bool:
+        print("[Indexer] Iniciando indexação a partir do banco de dados...")
         
-        self.id_to_filename = {}
+        self.id_to_image_id = {}
         self.embeddings = None
         self.index = None
         
         self.clip_engine = get_clip_engine()
         
-        image_files = get_image_files(self.images_folder)
-        
-        if not image_files:
-            print(f"[Indexer] Nenhuma imagem encontrada em '{self.images_folder}'")
+        if not images:
+            print("[Indexer] Nenhuma imagem encontrada no banco de dados")
             embedding_dim = self.clip_engine.get_embedding_dimension()
             self.index = faiss.IndexFlatIP(embedding_dim)
             self.is_initialized = True
             return True
         
-        print(f"[Indexer] Encontradas {len(image_files)} imagens para indexar")
+        print(f"[Indexer] Encontradas {len(images)} imagens para indexar")
         
         embeddings_list: List[np.ndarray] = []
         
-        for idx, (full_path, filename) in enumerate(image_files):
+        for idx, image_record in enumerate(images):
             try:
-                print(f"[Indexer] Processando ({idx + 1}/{len(image_files)}): {filename}")
+                full_path = image_record.storage_path
+                print(f"[Indexer] Processando ({idx + 1}/{len(images)}): {image_record.filename}")
+                
+                if not os.path.exists(full_path):
+                    print(f"[Indexer] Arquivo não encontrado: {full_path}")
+                    continue
                 
                 image = load_image_from_path(full_path)
                 embedding = self.clip_engine.generate_embedding(image)
-
                 embedding = embedding / np.linalg.norm(embedding)
-
                 embedding = embedding.astype(np.float32)
                 
                 faiss_idx = len(embeddings_list)
                 embeddings_list.append(embedding)
-                self.id_to_filename[faiss_idx] = filename
+                self.id_to_image_id[faiss_idx] = image_record.id
                 
             except Exception as e:
-                print(f"[Indexer] Erro ao processar {filename}: {e}")
+                print(f"[Indexer] Erro ao processar {image_record.filename}: {e}")
                 continue
         
         if not embeddings_list:
@@ -76,9 +77,38 @@ class ImageIndexer:
         self.is_initialized = True
         return True
     
-    def search(self, query_image) -> Tuple[Optional[str], float, int]:
+    def add_single_image(self, image_record) -> bool:
+        if not self.is_initialized or self.clip_engine is None:
+            return False
+        
+        try:
+            full_path = image_record.storage_path
+            
+            if not os.path.exists(full_path):
+                print(f"[Indexer] Arquivo não encontrado: {full_path}")
+                return False
+            
+            image = load_image_from_path(full_path)
+            embedding = self.clip_engine.generate_embedding(image)
+            embedding = embedding / np.linalg.norm(embedding)
+            embedding = embedding.reshape(1, -1).astype(np.float32)
+            
+            faiss.normalize_L2(embedding)
+            
+            faiss_idx = self.index.ntotal
+            self.index.add(embedding)
+            self.id_to_image_id[faiss_idx] = image_record.id
+            
+            print(f"[Indexer] Imagem adicionada ao índice: {image_record.filename}")
+            return True
+            
+        except Exception as e:
+            print(f"[Indexer] Erro ao adicionar imagem {image_record.filename}: {e}")
+            return False
+    
+    def search(self, query_image, get_image_by_id_func) -> Tuple[Optional[dict], float, int]:
         if not self.is_initialized:
-            raise RuntimeError("Indexador não foi inicializado. Chame initialize() primeiro.")
+            raise RuntimeError("Indexador não foi inicializado.")
         
         if self.index.ntotal == 0:
             return (None, 0.0, 0)
@@ -97,17 +127,25 @@ class ImageIndexer:
         similarity = max(0.0, min(1.0, raw_similarity))
         percentage = int(round(similarity * 100))
         
-        matched_filename = self.id_to_filename.get(best_idx, None)
+        image_id = self.id_to_image_id.get(best_idx, None)
         
-        return (matched_filename, similarity, percentage)
+        if image_id is None:
+            return (None, 0.0, 0)
+        
+        image_record = get_image_by_id_func(image_id)
+        
+        if image_record is None:
+            return (None, 0.0, 0)
+        
+        return (image_record, similarity, percentage)
     
     def get_indexed_count(self) -> int:
         if self.index is None:
             return 0
         return self.index.ntotal
     
-    def get_all_indexed_files(self) -> List[str]:
-        return list(self.id_to_filename.values())
+    def get_all_indexed_image_ids(self) -> List[int]:
+        return list(self.id_to_image_id.values())
 
 
 _indexer_instance = None
@@ -118,3 +156,8 @@ def get_indexer() -> ImageIndexer:
     if _indexer_instance is None:
         _indexer_instance = ImageIndexer()
     return _indexer_instance
+
+
+def reset_indexer():
+    global _indexer_instance
+    _indexer_instance = None

@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prototipo-Scan - Busca de Imagens</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Prototipo-Scan</h1>
+            <p class="subtitle">Busca de imagens por similaridade usando IA</p>
+            <nav class="nav-menu">
+                <a href="/" class="nav-link active">Buscar</a>
+                <a href="/categories" class="nav-link">Categorias</a>
+                <a href="/upload" class="nav-link">Cadastrar Imagens</a>
+            </nav>
+        </header>
+
+        <main>
+            <section class="upload-section">
+                <h2>Envie uma imagem para buscar</h2>
+                <div class="upload-area" id="uploadArea">
+                    <input type="file" id="imageInput" accept="image/*" hidden>
+                    <div class="upload-content">
+                        <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="17 8 12 3 7 8"/>
+                            <line x1="12" y1="3" x2="12" y2="15"/>
+                        </svg>
+                        <p>Clique ou arraste uma imagem aqui</p>
+                        <span class="file-types">JPG, PNG, GIF, WEBP</span>
+                    </div>
+                </div>
+
+                <div class="preview-container" id="previewContainer" style="display: none;">
+                    <img id="previewImage" alt="Preview da imagem">
+                    <button class="btn btn-secondary" id="clearBtn">Limpar</button>
+                </div>
+
+                <button class="btn btn-primary" id="searchBtn" disabled>
+                    <span class="btn-text">Buscar Imagem Similar</span>
+                    <span class="btn-loading" style="display: none;">
+                        <svg class="spinner" viewBox="0 0 24 24">
+                            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" fill="none" stroke-dasharray="30 70"/>
+                        </svg>
+                        Processando...
+                    </span>
+                </button>
+            </section>
+
+            <section class="result-section" id="resultSection" style="display: none;">
+                <h2>Resultado da Busca</h2>
+                <div class="result-card">
+                    <div class="result-images">
+                        <div class="result-image-box">
+                            <h3>Imagem Enviada</h3>
+                            <img id="sentImage" alt="Imagem enviada">
+                        </div>
+                        <div class="result-arrow">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="5" y1="12" x2="19" y2="12"/>
+                                <polyline points="12 5 19 12 12 19"/>
+                            </svg>
+                        </div>
+                        <div class="result-image-box">
+                            <h3>Imagem Encontrada</h3>
+                            <img id="matchedImage" alt="Imagem encontrada">
+                        </div>
+                    </div>
+                    <div class="result-info">
+                        <div class="category-badge" id="categoryBadge">
+                            <span class="category-label">Categoria:</span>
+                            <span class="category-name" id="categoryName">-</span>
+                        </div>
+                        <div class="similarity-meter">
+                            <div class="similarity-bar" id="similarityBar"></div>
+                        </div>
+                        <div class="similarity-text">
+                            <span class="similarity-value" id="similarityValue">0%</span>
+                            <span class="similarity-label">Similaridade</span>
+                        </div>
+                        <p class="match-filename">Arquivo: <span id="matchFilename">-</span></p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="error-section" id="errorSection" style="display: none;">
+                <div class="error-card">
+                    <svg class="error-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="15" y1="9" x2="9" y2="15"/>
+                        <line x1="9" y1="9" x2="15" y2="15"/>
+                    </svg>
+                    <p id="errorMessage">Erro ao processar a imagem</p>
+                </div>
+            </section>
+
+            <section class="stats-section">
+                <h2>Estatisticas do Sistema</h2>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <span class="stat-value" id="totalCategories">0</span>
+                        <span class="stat-label">Categorias</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-value" id="totalImages">0</span>
+                        <span class="stat-label">Imagens</span>
+                    </div>
+                    <div class="stat-card">
+                        <span class="stat-value" id="indexedImages">0</span>
+                        <span class="stat-label">Indexadas</span>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>Desenvolvido com CLIP + FAISS</p>
+        </footer>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const uploadArea = document.getElementById('uploadArea');
+            const imageInput = document.getElementById('imageInput');
+            const previewContainer = document.getElementById('previewContainer');
+            const previewImage = document.getElementById('previewImage');
+            const clearBtn = document.getElementById('clearBtn');
+            const searchBtn = document.getElementById('searchBtn');
+            const resultSection = document.getElementById('resultSection');
+            const errorSection = document.getElementById('errorSection');
+            const errorMessage = document.getElementById('errorMessage');
+
+            let selectedFile = null;
+
+            loadStats();
+
+            uploadArea.addEventListener('click', () => imageInput.click());
+            
+            uploadArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                uploadArea.classList.add('dragover');
+            });
+            
+            uploadArea.addEventListener('dragleave', () => {
+                uploadArea.classList.remove('dragover');
+            });
+            
+            uploadArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                uploadArea.classList.remove('dragover');
+                const files = e.dataTransfer.files;
+                if (files.length > 0) {
+                    handleFile(files[0]);
+                }
+            });
+            
+            imageInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    handleFile(e.target.files[0]);
+                }
+            });
+            
+            clearBtn.addEventListener('click', clearSelection);
+            
+            searchBtn.addEventListener('click', performSearch);
+
+            function handleFile(file) {
+                if (!file.type.startsWith('image/')) {
+                    showError('Por favor, selecione um arquivo de imagem.');
+                    return;
+                }
+
+                selectedFile = file;
+                const reader = new FileReader();
+                
+                reader.onload = (e) => {
+                    previewImage.src = e.target.result;
+                    previewContainer.style.display = 'block';
+                    uploadArea.style.display = 'none';
+                    searchBtn.disabled = false;
+                };
+                
+                reader.readAsDataURL(file);
+            }
+
+            function clearSelection() {
+                selectedFile = null;
+                imageInput.value = '';
+                previewContainer.style.display = 'none';
+                uploadArea.style.display = 'block';
+                searchBtn.disabled = true;
+                resultSection.style.display = 'none';
+                errorSection.style.display = 'none';
+            }
+
+            async function performSearch() {
+                if (!selectedFile) return;
+
+                const btnText = searchBtn.querySelector('.btn-text');
+                const btnLoading = searchBtn.querySelector('.btn-loading');
+                
+                btnText.style.display = 'none';
+                btnLoading.style.display = 'flex';
+                searchBtn.disabled = true;
+                resultSection.style.display = 'none';
+                errorSection.style.display = 'none';
+
+                const formData = new FormData();
+                formData.append('image', selectedFile);
+
+                try {
+                    const response = await fetch('/search', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    const data = await response.json();
+
+                    if (response.ok) {
+                        showResult(data);
+                    } else {
+                        showError(data.message || 'Erro ao buscar imagem similar.');
+                    }
+                } catch (error) {
+                    showError('Erro de conexão. Tente novamente.');
+                } finally {
+                    btnText.style.display = 'inline';
+                    btnLoading.style.display = 'none';
+                    searchBtn.disabled = false;
+                }
+            }
+
+            function showResult(data) {
+                document.getElementById('sentImage').src = previewImage.src;
+                document.getElementById('matchedImage').src = `/images/${data.match_image}`;
+                document.getElementById('matchFilename').textContent = data.original_filename || data.match_image;
+                
+                if (data.category) {
+                    document.getElementById('categoryName').textContent = data.category.name;
+                    document.getElementById('categoryBadge').style.display = 'flex';
+                } else {
+                    document.getElementById('categoryBadge').style.display = 'none';
+                }
+                
+                const percentage = data.percentage;
+                document.getElementById('similarityValue').textContent = `${percentage}%`;
+                document.getElementById('similarityBar').style.width = `${percentage}%`;
+                
+                resultSection.style.display = 'block';
+                errorSection.style.display = 'none';
+                
+                resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+
+            function showError(message) {
+                errorMessage.textContent = message;
+                errorSection.style.display = 'block';
+                resultSection.style.display = 'none';
+            }
+
+            async function loadStats() {
+                try {
+                    const response = await fetch('/api/stats');
+                    const data = await response.json();
+                    
+                    document.getElementById('totalCategories').textContent = data.total_categories || 0;
+                    document.getElementById('totalImages').textContent = data.total_images || 0;
+                    document.getElementById('indexedImages').textContent = data.indexed_images || 0;
+                } catch (error) {
+                    console.error('Erro ao carregar estatísticas:', error);
+                }
+            }
+        });
+    </script>
+</body>
+</html>

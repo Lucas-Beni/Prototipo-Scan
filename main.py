@@ -1,30 +1,49 @@
 from flask import Flask, request, jsonify, render_template, send_from_directory
-from indexer import get_indexer
+from models import db, Category, Image
+from indexer import get_indexer, reset_indexer
 from utils import load_image_from_bytes, validate_image_file
 import os
+import uuid
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///prototipo_scan.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+db.init_app(app)
+
+IMAGES_FOLDER = 'images'
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
 indexer = None
 
 
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def get_image_by_id(image_id):
+    return Image.query.get(image_id)
+
+
+def initialize_indexer():
+    global indexer
+    indexer = get_indexer()
+    with app.app_context():
+        images = Image.query.all()
+        indexer.initialize_from_db(images)
+
+
 @app.before_request
 def ensure_initialized():
-    """
-    Garante que o indexador está inicializado antes de processar requisições.
-    """
     global indexer
     if indexer is None:
-        indexer = get_indexer()
-        indexer.initialize()
+        initialize_indexer()
 
 
 @app.after_request
 def add_cache_control(response):
-    """
-    Desabilita cache para evitar problemas com atualizações.
-    """
     response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
     response.headers['Pragma'] = 'no-cache'
     response.headers['Expires'] = '0'
@@ -33,77 +52,187 @@ def add_cache_control(response):
 
 @app.route('/')
 def index():
-    """
-    Rota principal - retorna a interface visual ou JSON da API.
-    """
-    if request.accept_mimetypes.best == 'application/json':
-        indexed_count = indexer.get_indexed_count() if indexer and indexer.is_initialized else 0
-        indexed_files = indexer.get_all_indexed_files() if indexer and indexer.is_initialized else []
-        
-        return jsonify({
-            "api": "Prototipo-Scan API",
-            "version": "1.0.0",
-            "description": "API de busca de imagens por similaridade usando CLIP e FAISS",
-            "endpoints": {
-                "POST /search": "Busca a imagem mais similar. Envie uma imagem no campo 'image'."
-            },
-            "indexed_images": indexed_count,
-            "indexed_files": indexed_files
-        })
-    
-    return render_template('index.html')
+    return render_template('search.html')
 
 
-@app.route('/api')
-def api_info():
-    """
-    Rota da API - retorna informações sobre a API em JSON.
-    """
-    indexed_count = indexer.get_indexed_count() if indexer and indexer.is_initialized else 0
-    indexed_files = indexer.get_all_indexed_files() if indexer and indexer.is_initialized else []
-    
-    return jsonify({
-        "api": "Prototipo-Scan API",
-        "version": "1.0.0",
-        "description": "API de busca de imagens por similaridade usando CLIP e FAISS",
-        "endpoints": {
-            "POST /search": "Busca a imagem mais similar. Envie uma imagem no campo 'image'."
-        },
-        "indexed_images": indexed_count,
-        "indexed_files": indexed_files
-    })
+@app.route('/categories')
+def categories_page():
+    return render_template('categories.html')
+
+
+@app.route('/upload')
+def upload_page():
+    return render_template('upload.html')
 
 
 @app.route('/images/<path:filename>')
 def serve_image(filename):
-    """
-    Serve imagens da pasta images/.
-    """
-    return send_from_directory('images', filename)
+    return send_from_directory(IMAGES_FOLDER, filename)
+
+
+@app.route('/api/categories', methods=['GET'])
+def get_categories():
+    categories = Category.query.all()
+    return jsonify([c.to_dict() for c in categories])
+
+
+@app.route('/api/categories', methods=['POST'])
+def create_category():
+    data = request.get_json()
+    
+    if not data or not data.get('name'):
+        return jsonify({'error': 'Nome da categoria é obrigatório'}), 400
+    
+    name = data['name'].strip()
+    description = data.get('description', '').strip()
+    
+    existing = Category.query.filter_by(name=name).first()
+    if existing:
+        return jsonify({'error': 'Categoria com este nome já existe'}), 400
+    
+    category = Category(name=name, description=description)
+    db.session.add(category)
+    db.session.commit()
+    
+    return jsonify(category.to_dict()), 201
+
+
+@app.route('/api/categories/<int:category_id>', methods=['GET'])
+def get_category(category_id):
+    category = Category.query.get_or_404(category_id)
+    return jsonify(category.to_dict())
+
+
+@app.route('/api/categories/<int:category_id>', methods=['PUT'])
+def update_category(category_id):
+    category = Category.query.get_or_404(category_id)
+    data = request.get_json()
+    
+    if not data:
+        return jsonify({'error': 'Dados inválidos'}), 400
+    
+    if 'name' in data:
+        name = data['name'].strip()
+        existing = Category.query.filter(Category.name == name, Category.id != category_id).first()
+        if existing:
+            return jsonify({'error': 'Categoria com este nome já existe'}), 400
+        category.name = name
+    
+    if 'description' in data:
+        category.description = data['description'].strip()
+    
+    db.session.commit()
+    return jsonify(category.to_dict())
+
+
+@app.route('/api/categories/<int:category_id>', methods=['DELETE'])
+def delete_category(category_id):
+    category = Category.query.get_or_404(category_id)
+    
+    for image in category.images:
+        if os.path.exists(image.storage_path):
+            os.remove(image.storage_path)
+    
+    db.session.delete(category)
+    db.session.commit()
+    
+    reset_indexer()
+    initialize_indexer()
+    
+    return jsonify({'message': 'Categoria excluída com sucesso'})
+
+
+@app.route('/api/images', methods=['GET'])
+def get_images():
+    category_id = request.args.get('category_id', type=int)
+    
+    if category_id:
+        images = Image.query.filter_by(category_id=category_id).all()
+    else:
+        images = Image.query.all()
+    
+    return jsonify([img.to_dict() for img in images])
+
+
+@app.route('/api/images', methods=['POST'])
+def upload_image():
+    global indexer
+    
+    if 'image' not in request.files:
+        return jsonify({'error': 'Nenhuma imagem enviada'}), 400
+    
+    file = request.files['image']
+    category_id = request.form.get('category_id', type=int)
+    
+    if not category_id:
+        return jsonify({'error': 'Categoria é obrigatória'}), 400
+    
+    category = Category.query.get(category_id)
+    if not category:
+        return jsonify({'error': 'Categoria não encontrada'}), 404
+    
+    if file.filename == '':
+        return jsonify({'error': 'Arquivo vazio'}), 400
+    
+    if not allowed_file(file.filename):
+        return jsonify({'error': 'Tipo de arquivo não permitido'}), 400
+    
+    original_filename = secure_filename(file.filename)
+    unique_filename = f"{uuid.uuid4().hex}_{original_filename}"
+    
+    if not os.path.exists(IMAGES_FOLDER):
+        os.makedirs(IMAGES_FOLDER)
+    
+    storage_path = os.path.join(IMAGES_FOLDER, unique_filename)
+    file.save(storage_path)
+    
+    image_record = Image(
+        filename=unique_filename,
+        original_filename=original_filename,
+        category_id=category_id,
+        storage_path=storage_path
+    )
+    db.session.add(image_record)
+    db.session.commit()
+    
+    if indexer and indexer.is_initialized:
+        indexer.add_single_image(image_record)
+    
+    return jsonify(image_record.to_dict()), 201
+
+
+@app.route('/api/images/<int:image_id>', methods=['DELETE'])
+def delete_image(image_id):
+    image = Image.query.get_or_404(image_id)
+    
+    if os.path.exists(image.storage_path):
+        os.remove(image.storage_path)
+    
+    db.session.delete(image)
+    db.session.commit()
+    
+    reset_indexer()
+    initialize_indexer()
+    
+    return jsonify({'message': 'Imagem excluída com sucesso'})
 
 
 @app.route('/search', methods=['POST'])
 def search():
-    """
-    Rota de busca - recebe uma imagem e retorna a mais similar do índice.
+    global indexer
     
-    Espera um arquivo de imagem no campo 'image' do form-data.
-    
-    Returns:
-        JSON com match_image, similarity e percentage
-    """
     if 'image' not in request.files:
         return jsonify({
-            "error": "Nenhuma imagem enviada",
-            "message": "Envie uma imagem no campo 'image'"
+            'error': 'Nenhuma imagem enviada',
+            'message': 'Envie uma imagem no campo "image"'
         }), 400
     
     file = request.files['image']
     
     if file.filename == '':
         return jsonify({
-            "error": "Arquivo vazio",
-            "message": "O arquivo enviado está vazio"
+            'error': 'Arquivo vazio',
+            'message': 'O arquivo enviado está vazio'
         }), 400
     
     try:
@@ -111,83 +240,94 @@ def search():
         
         if not validate_image_file(image_bytes):
             return jsonify({
-                "error": "Arquivo inválido",
-                "message": "O arquivo enviado não é uma imagem válida"
+                'error': 'Arquivo inválido',
+                'message': 'O arquivo enviado não é uma imagem válida'
             }), 400
         
         query_image = load_image_from_bytes(image_bytes)
         
         if indexer.get_indexed_count() == 0:
             return jsonify({
-                "error": "Índice vazio",
-                "message": "Não há imagens indexadas. Adicione imagens à pasta 'images/' e reinicie o servidor."
+                'error': 'Índice vazio',
+                'message': 'Não há imagens indexadas. Adicione imagens primeiro.'
             }), 404
         
-        match_filename, similarity, percentage = indexer.search(query_image)
+        image_record, similarity, percentage = indexer.search(query_image, get_image_by_id)
         
-        if match_filename is None:
+        if image_record is None:
             return jsonify({
-                "error": "Nenhuma correspondência encontrada",
-                "message": "Não foi possível encontrar uma imagem similar"
+                'error': 'Nenhuma correspondência encontrada',
+                'message': 'Não foi possível encontrar uma imagem similar'
             }), 404
         
         return jsonify({
-            "match_image": match_filename,
-            "similarity": round(similarity, 4),
-            "percentage": percentage
+            'match_image': image_record.filename,
+            'original_filename': image_record.original_filename,
+            'similarity': round(similarity, 4),
+            'percentage': percentage,
+            'category': {
+                'id': image_record.category.id,
+                'name': image_record.category.name,
+                'description': image_record.category.description
+            }
         })
         
     except Exception as e:
         return jsonify({
-            "error": "Erro interno",
-            "message": str(e)
+            'error': 'Erro interno',
+            'message': str(e)
         }), 500
+
+
+@app.route('/api/stats')
+def stats():
+    return jsonify({
+        'indexed_images': indexer.get_indexed_count() if indexer and indexer.is_initialized else 0,
+        'total_categories': Category.query.count(),
+        'total_images': Image.query.count()
+    })
 
 
 @app.route('/health')
 def health():
-    """
-    Rota de health check.
-    """
     return jsonify({
-        "status": "healthy",
-        "indexed_images": indexer.get_indexed_count() if indexer and indexer.is_initialized else 0
+        'status': 'healthy',
+        'indexed_images': indexer.get_indexed_count() if indexer and indexer.is_initialized else 0
     })
 
 
 @app.route('/reindex', methods=['POST'])
 def reindex():
-    """
-    Força reindexação das imagens.
-    """
     global indexer
     try:
-        indexer = get_indexer()
-        indexer.initialize()
+        reset_indexer()
+        initialize_indexer()
         return jsonify({
-            "status": "success",
-            "message": "Reindexação concluída",
-            "indexed_images": indexer.get_indexed_count()
+            'status': 'success',
+            'message': 'Reindexação concluída',
+            'indexed_images': indexer.get_indexed_count()
         })
     except Exception as e:
         return jsonify({
-            "error": "Erro na reindexação",
-            "message": str(e)
+            'error': 'Erro na reindexação',
+            'message': str(e)
         }), 500
 
 
 if __name__ == '__main__':
-    print("=" * 60)
-    print("PROTOTIPO-SCAN API")
-    print("Busca de imagens por similaridade usando CLIP + FAISS")
-    print("=" * 60)
-    
-    indexer = get_indexer()
-    indexer.initialize()
-    
-    print("=" * 60)
-    print(f"Imagens indexadas: {indexer.get_indexed_count()}")
-    print("Servidor iniciando em http://0.0.0.0:5000")
-    print("=" * 60)
+    with app.app_context():
+        db.create_all()
+        print("=" * 60)
+        print("PROTOTIPO-SCAN API")
+        print("Sistema de busca de imagens com categorias")
+        print("=" * 60)
+        
+        initialize_indexer()
+        
+        print("=" * 60)
+        print(f"Imagens indexadas: {indexer.get_indexed_count()}")
+        print(f"Categorias: {Category.query.count()}")
+        print("Servidor iniciando em http://0.0.0.0:5000")
+        print("=" * 60)
     
     app.run(host='0.0.0.0', port=5000, debug=False)
