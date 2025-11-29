@@ -159,6 +159,8 @@ class ImageIndexer:
         if self.index.ntotal == 0:
             return (None, 0.0, 0, "Nenhuma imagem no índice", [])
         
+        self._query_text_embedding = None
+        
         query_embedding = self.clip_service.generate_image_embedding(query_image)
         query_embedding = query_embedding / np.linalg.norm(query_embedding)
         query_embedding = query_embedding.reshape(1, -1).astype(np.float32)
@@ -185,9 +187,17 @@ class ImageIndexer:
             category_similarity = 0.0
             if image_record.category_id in self.category_embeddings:
                 cat_embedding = self.category_embeddings[image_record.category_id]
-                query_flat = query_embedding.flatten()
-                category_similarity = float(np.dot(query_flat, cat_embedding))
-                category_similarity = max(0.0, min(1.0, category_similarity))
+                if not hasattr(self, '_query_text_embedding') or self._query_text_embedding is None:
+                    query_caption = self.clip_service.generate_image_caption(query_image)
+                    if query_caption:
+                        self._query_text_embedding = self.clip_service.generate_text_embedding(query_caption)
+                        self._query_text_embedding = self._query_text_embedding / np.linalg.norm(self._query_text_embedding)
+                    else:
+                        self._query_text_embedding = None
+                
+                if self._query_text_embedding is not None:
+                    category_similarity = float(np.dot(self._query_text_embedding.flatten(), cat_embedding.flatten()))
+                    category_similarity = max(0.0, min(1.0, category_similarity))
             
             combined_score = (1 - category_weight) * image_similarity + category_weight * category_similarity
             
