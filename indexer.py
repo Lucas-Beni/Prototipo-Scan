@@ -117,8 +117,40 @@ class ImageIndexer:
             return {cat_id: 0.5 for cat_id in self.category_embeddings.keys()}
         
         try:
+            candidate_labels = []
+            cat_id_order = []
+            for cat_id, description in self.category_descriptions.items():
+                candidate_labels.append(description)
+                cat_id_order.append(cat_id)
+            
+            print(f"[Indexer] Classificando imagem com zero-shot usando labels: {candidate_labels}")
+            
+            zero_shot_results = self.clip_service.zero_shot_classify(query_image, candidate_labels)
+            
+            scores = {}
+            if zero_shot_results:
+                print(f"[Indexer] Resultados zero-shot: {zero_shot_results}")
+                
+                for cat_id, description in self.category_descriptions.items():
+                    if description in zero_shot_results:
+                        scores[cat_id] = zero_shot_results[description]
+                    else:
+                        scores[cat_id] = 0.5
+                
+                print(f"[Indexer] Scores de categoria por zero-shot: {scores}")
+                return scores
+            else:
+                print("[Indexer] Zero-shot falhou, tentando abordagem com caption...")
+                return self._compute_category_text_scores_fallback(query_image)
+                
+        except Exception as e:
+            print(f"[Indexer] Erro ao calcular scores de categoria: {e}")
+            return self._compute_category_text_scores_fallback(query_image)
+    
+    def _compute_category_text_scores_fallback(self, query_image) -> Dict[int, float]:
+        try:
             caption = self.clip_service.generate_image_caption(query_image)
-            print(f"[Indexer] Caption da imagem de busca: {caption}")
+            print(f"[Indexer] Caption da imagem de busca (fallback): {caption}")
             
             if caption:
                 caption_embedding = self.clip_service.generate_text_embedding(caption)
@@ -134,15 +166,13 @@ class ImageIndexer:
                     else:
                         scores[cat_id] = 0.5
                 
-                print(f"[Indexer] Scores de categoria por descrição textual: {scores}")
+                print(f"[Indexer] Scores de categoria por caption (fallback): {scores}")
                 return scores
-            else:
-                print("[Indexer] Não foi possível gerar caption, usando scores neutros")
-                return {cat_id: 0.5 for cat_id in self.category_embeddings.keys()}
-                
         except Exception as e:
-            print(f"[Indexer] Erro ao calcular scores de categoria: {e}")
-            return {cat_id: 0.5 for cat_id in self.category_embeddings.keys()}
+            print(f"[Indexer] Erro no fallback: {e}")
+        
+        print("[Indexer] Usando scores neutros como último recurso")
+        return {cat_id: 0.5 for cat_id in self.category_embeddings.keys()}
     
     def _initialize_category_embeddings(self, categories):
         print("[Indexer] Gerando embeddings das categorias com modelo multilíngue...")
