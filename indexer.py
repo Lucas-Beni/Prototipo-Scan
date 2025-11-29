@@ -112,58 +112,8 @@ class ImageIndexer:
                 print(f"[Indexer] Embedding médio calculado para categoria {cat_id} ({len(emb_list)} imagens)")
     
     def _compute_category_text_scores(self, query_image) -> Dict[int, float]:
-        if not self.category_descriptions:
-            print("[Indexer] Nenhuma descrição de categoria disponível, usando scores neutros")
-            return {cat_id: 0.5 for cat_id in self.category_embeddings.keys()}
-        
-        try:
-            labels = self.clip_service.get_image_labels(query_image)
-            
-            if labels:
-                print(f"[Indexer] Labels detectados na imagem: {[l.get('label', '') for l in labels[:5]]}")
-                
-                labels_text = ", ".join([item.get('label', '') for item in labels[:5]])
-                print(f"[Indexer] Texto dos labels: {labels_text}")
-                
-                labels_embedding = self.clip_service.generate_text_embedding(labels_text)
-                labels_embedding = labels_embedding / np.linalg.norm(labels_embedding)
-                
-                scores = {}
-                for cat_id, description in self.category_descriptions.items():
-                    if cat_id in self.category_embeddings:
-                        cat_embedding = self.category_embeddings[cat_id]
-                        similarity = float(np.dot(labels_embedding, cat_embedding))
-                        similarity = max(0.0, min(1.0, (similarity + 1) / 2))
-                        scores[cat_id] = similarity
-                    else:
-                        scores[cat_id] = 0.5
-                
-                density_analysis = self.clip_service.classify_density_from_labels(labels)
-                if density_analysis:
-                    print(f"[Indexer] Análise de densidade: {density_analysis}")
-                    
-                    for cat_id, description in self.category_descriptions.items():
-                        desc_lower = description.lower()
-                        if any(word in desc_lower for word in ['vazia', 'pouco', 'poucos', 'leve', 'empty', 'few', 'sparse']):
-                            bonus = density_analysis.get('low', 0) * 0.5
-                            scores[cat_id] = min(1.0, scores.get(cat_id, 0.5) + bonus)
-                            if density_analysis.get('high', 0) > density_analysis.get('low', 0):
-                                scores[cat_id] = max(0.1, scores.get(cat_id, 0.5) - 0.3)
-                        elif any(word in desc_lower for word in ['cheia', 'muita', 'muitos', 'pesado', 'full', 'many', 'dense', 'crowded']):
-                            bonus = density_analysis.get('high', 0) * 0.5
-                            scores[cat_id] = min(1.0, scores.get(cat_id, 0.5) + bonus)
-                            if density_analysis.get('low', 0) > density_analysis.get('high', 0):
-                                scores[cat_id] = max(0.1, scores.get(cat_id, 0.5) - 0.3)
-                
-                print(f"[Indexer] Scores de categoria ajustados: {scores}")
-                return scores
-            else:
-                print("[Indexer] Não foi possível obter labels, usando scores neutros")
-                return {cat_id: 0.5 for cat_id in self.category_embeddings.keys()}
-                
-        except Exception as e:
-            print(f"[Indexer] Erro ao calcular scores de categoria: {e}")
-            return {cat_id: 0.5 for cat_id in self.category_embeddings.keys()}
+        print("[Indexer] Desabilitando scores de categoria (API não disponível)")
+        return {cat_id: 0.5 for cat_id in self.category_image_embeddings.keys()}
     
     def _initialize_category_embeddings(self, categories):
         print("[Indexer] Gerando embeddings das categorias com modelo multilíngue...")
@@ -262,6 +212,7 @@ class ImageIndexer:
         category_text_scores = self._compute_category_text_scores(query_image)
         
         candidates = []
+        print(f"[Indexer] Analisando {k} candidatos mais similares:")
         for i in range(k):
             faiss_idx = int(indices[0][i])
             image_similarity = float(distances[0][i])
@@ -275,7 +226,10 @@ class ImageIndexer:
             if image_record is None:
                 continue
             
-            category_similarity = category_text_scores.get(image_record.category_id, 0.0)
+            category_name = image_record.category.name if image_record.category else "?"
+            print(f"  [{i+1}] {image_record.filename} - Categoria: {category_name} - Similaridade: {image_similarity:.3f}")
+            
+            category_similarity = category_text_scores.get(image_record.category_id, 0.5)
             
             combined_score = (1 - category_weight) * image_similarity + category_weight * category_similarity
             
