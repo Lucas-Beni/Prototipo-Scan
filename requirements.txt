@@ -4,3 +4,9 @@ Pillow
 numpy
 requests
 python-dotenv
+faiss-cpu
+flask
+numpy
+Pillow
+python-dotenv
+requests
