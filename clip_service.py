@@ -14,14 +14,14 @@ VIT_URL = f"https://router.huggingface.co/hf-inference/models/{VIT_MODEL}"
 TEXT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 TEXT_EMBEDDING_URL = f"https://router.huggingface.co/hf-inference/models/{TEXT_EMBEDDING_MODEL}"
 
-CLIP_MODEL = "openai/clip-vit-base-patch32"
-CLIP_URL = f"https://router.huggingface.co/hf-inference/models/{CLIP_MODEL}"
+CLIP_MODEL = "openai/clip-vit-large-patch14"
+CLIP_URL = f"https://api-inference.huggingface.co/models/{CLIP_MODEL}"
 
 BLIP_MODEL = "Salesforce/blip-image-captioning-base"
-BLIP_URL = f"https://router.huggingface.co/hf-inference/models/{BLIP_MODEL}"
+BLIP_URL = f"https://api-inference.huggingface.co/models/{BLIP_MODEL}"
 
 TRANSLATION_MODEL = "Helsinki-NLP/opus-mt-en-pt"
-TRANSLATION_URL = f"https://router.huggingface.co/hf-inference/models/{TRANSLATION_MODEL}"
+TRANSLATION_URL = f"https://api-inference.huggingface.co/models/{TRANSLATION_MODEL}"
 
 IMAGE_EMBEDDING_DIM = 768
 TEXT_EMBEDDING_DIM = 384
@@ -221,8 +221,8 @@ class CLIPService:
             img_base64 = base64.b64encode(img_bytes).decode('utf-8')
             
             payload = {
-                "inputs": img_base64,
-                "parameters": {
+                "inputs": {
+                    "image": img_base64,
                     "candidate_labels": candidate_labels
                 }
             }
