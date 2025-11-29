@@ -14,6 +14,9 @@ VIT_URL = f"https://router.huggingface.co/hf-inference/models/{VIT_MODEL}"
 TEXT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 TEXT_EMBEDDING_URL = f"https://router.huggingface.co/hf-inference/models/{TEXT_EMBEDDING_MODEL}"
 
+CLIP_MODEL = "openai/clip-vit-base-patch32"
+CLIP_URL = f"https://router.huggingface.co/hf-inference/models/{CLIP_MODEL}"
+
 BLIP_MODEL = "Salesforce/blip-image-captioning-base"
 BLIP_URL = f"https://router.huggingface.co/hf-inference/models/{BLIP_MODEL}"
 
@@ -210,6 +213,40 @@ class CLIPService:
 
         except Exception as e:
             print(f"[CLIPService] Erro ao gerar caption: {e}")
+            return None
+
+    def zero_shot_classify(self, image, candidate_labels):
+        try:
+            img_bytes = self._prepare_image(image)
+            img_base64 = base64.b64encode(img_bytes).decode('utf-8')
+            
+            payload = {
+                "inputs": img_base64,
+                "parameters": {
+                    "candidate_labels": candidate_labels
+                }
+            }
+            
+            response = self._call_api_with_retry(CLIP_URL, json_data=payload)
+            
+            if response.status_code == 200:
+                data = response.json()
+                print(f"[CLIPService] Zero-shot resultado: {data}")
+                
+                if isinstance(data, list) and len(data) > 0:
+                    results = {}
+                    for item in data:
+                        if isinstance(item, dict) and 'label' in item and 'score' in item:
+                            results[item['label']] = item['score']
+                    return results
+                elif isinstance(data, dict):
+                    return data
+            
+            print(f"[CLIPService] Zero-shot falhou ({response.status_code}): {response.text[:200]}")
+            return None
+            
+        except Exception as e:
+            print(f"[CLIPService] Erro no zero-shot: {e}")
             return None
 
     def translate_to_portuguese(self, text):

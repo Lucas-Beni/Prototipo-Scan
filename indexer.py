@@ -161,6 +161,8 @@ class ImageIndexer:
             return (None, 0.0, 0, "Nenhuma imagem no índice", [])
         
         self._query_text_embedding = None
+        self._zero_shot_scores = None
+        self._category_id_map = None
         
         query_embedding = self.clip_service.generate_image_embedding(query_image)
         query_embedding = query_embedding / np.linalg.norm(query_embedding)
@@ -187,27 +189,40 @@ class ImageIndexer:
             
             category_similarity = 0.0
             if image_record.category_id in self.category_embeddings:
-                cat_embedding = self.category_embeddings[image_record.category_id]
-                if not hasattr(self, '_query_text_embedding') or self._query_text_embedding is None:
-                    query_caption = self.clip_service.generate_image_caption(query_image)
-                    if query_caption:
-                        query_caption_pt = self.clip_service.translate_to_portuguese(query_caption)
-                        print(f"[Indexer] Caption traduzido: {query_caption} -> {query_caption_pt}")
-                        self._query_text_embedding = self.clip_service.generate_text_embedding(query_caption_pt)
-                        norm = np.linalg.norm(self._query_text_embedding)
-                        if norm > 0:
-                            self._query_text_embedding = self._query_text_embedding / norm
+                if not hasattr(self, '_zero_shot_scores') or self._zero_shot_scores is None:
+                    category_descriptions = []
+                    category_id_map = {}
+                    for cat_id, cat_emb in self.category_embeddings.items():
+                        cat_record = get_image_by_id_func(image_id)
+                        if cat_record and cat_record.category:
+                            desc = cat_record.category.description
+                            if desc and desc not in category_descriptions:
+                                category_descriptions.append(desc)
+                                category_id_map[desc] = cat_id
+                    
+                    if not category_descriptions:
+                        from models import Category
+                        categories = Category.query.all()
+                        for cat in categories:
+                            if cat.description:
+                                category_descriptions.append(cat.description)
+                                category_id_map[cat.description] = cat.id
+                    
+                    if category_descriptions:
+                        print(f"[Indexer] Classificando imagem entre categorias: {category_descriptions}")
+                        self._zero_shot_scores = self.clip_service.zero_shot_classify(query_image, category_descriptions)
+                        self._category_id_map = category_id_map
+                        if self._zero_shot_scores:
+                            print(f"[Indexer] Scores zero-shot: {self._zero_shot_scores}")
                     else:
-                        self._query_text_embedding = None
+                        self._zero_shot_scores = {}
+                        self._category_id_map = {}
                 
-                if self._query_text_embedding is not None:
-                    cat_norm = np.linalg.norm(cat_embedding)
-                    if cat_norm > 0:
-                        cat_embedding_normalized = cat_embedding / cat_norm
-                    else:
-                        cat_embedding_normalized = cat_embedding
-                    category_similarity = float(np.dot(self._query_text_embedding.flatten(), cat_embedding_normalized.flatten()))
-                    category_similarity = max(0.0, min(1.0, category_similarity))
+                if self._zero_shot_scores and self._category_id_map:
+                    for desc, cat_id in self._category_id_map.items():
+                        if cat_id == image_record.category_id:
+                            category_similarity = self._zero_shot_scores.get(desc, 0.0)
+                            break
             
             combined_score = (1 - category_weight) * image_similarity + category_weight * category_similarity
             
