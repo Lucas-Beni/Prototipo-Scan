@@ -1,69 +1,68 @@
-import base64
 import requests
-import numpy as np
 from PIL import Image
 from io import BytesIO
 import os
-from dotenv import load_dotenv
 
-load_dotenv()
+DEEPAI_API_KEY = "quickstart-QUdJIGlzIGNvbWluZy4uLi4K"
+DEEPAI_URL = "https://api.deepai.org/api/image-similarity"
 
-HF_API_KEY = os.getenv("HF_API_KEY")
 
-HF_MODEL = "sentence-transformers/clip-ViT-B-32"
-HF_URL = f"https://router.huggingface.co/pipeline/feature-extraction/{HF_MODEL}"
-
-class CLIPEngine:
+class ImageComparer:
     def __init__(self):
-        if not HF_API_KEY:
-            raise ValueError("Você precisa definir a variável de ambiente HF_API_KEY.")
-        print("[CLIPEngine] Usando HuggingFace API:", HF_URL)
+        print("[ImageComparer] Usando DeepAI API (gratuita)")
 
-    def get_embedding_dimension(self):
-        return 512  # CLIP padrão
+    def _image_to_bytes(self, image):
+        buffered = BytesIO()
+        if image.mode == 'RGBA':
+            image = image.convert('RGB')
+        image.save(buffered, format="JPEG", quality=85)
+        buffered.seek(0)
+        return buffered.getvalue()
 
-    def generate_embedding(self, image):
-
+    def compare_images(self, image1, image2):
         try:
-            # Converte imagem para base64
-            buffered = BytesIO()
-            image.save(buffered, format="PNG")
-            img_bytes = buffered.getvalue()
-
-            encoded_image = base64.b64encode(img_bytes).decode("utf-8")
-
-            payload = {
-                "inputs": {
-                    "image": encoded_image
-                }
+            img1_bytes = self._image_to_bytes(image1)
+            img2_bytes = self._image_to_bytes(image2)
+            
+            files = {
+                'image1': ('image1.jpg', img1_bytes, 'image/jpeg'),
+                'image2': ('image2.jpg', img2_bytes, 'image/jpeg')
             }
-
+            
             headers = {
-                "Authorization": f"Bearer {HF_API_KEY}",
-                "Content-Type": "application/json"
+                'api-key': DEEPAI_API_KEY
             }
-
-            response = requests.post(HF_URL, headers=headers, json=payload)
-
+            
+            response = requests.post(DEEPAI_URL, files=files, headers=headers, timeout=30)
+            
             if response.status_code != 200:
-                raise RuntimeError(
-                    f"Erro HuggingFace {response.status_code}: {response.text}"
-                )
-
+                print(f"[ImageComparer] Erro DeepAI {response.status_code}: {response.text}")
+                return 0.0
+            
             data = response.json()
-
-            emb = np.array(data, dtype=np.float32)
-            emb = emb / np.linalg.norm(emb)
-            return emb
-
+            
+            if 'output' in data and 'distance' in data['output']:
+                distance = float(data['output']['distance'])
+                similarity = max(0, 100 - distance) / 100
+                return similarity
+            elif 'output' in data:
+                distance = float(data['output'])
+                similarity = max(0, 100 - distance) / 100
+                return similarity
+            
+            print(f"[ImageComparer] Resposta inesperada: {data}")
+            return 0.0
+            
         except Exception as e:
-            raise RuntimeError(f"Erro ao gerar embedding via HuggingFace: {e}")
+            print(f"[ImageComparer] Erro ao comparar imagens: {e}")
+            return 0.0
 
 
-_engine_instance = None
+_comparer_instance = None
 
-def get_clip_engine():
-    global _engine_instance
-    if _engine_instance is None:
-        _engine_instance = CLIPEngine()
-    return _engine_instance
+
+def get_image_comparer():
+    global _comparer_instance
+    if _comparer_instance is None:
+        _comparer_instance = ImageComparer()
+    return _comparer_instance
