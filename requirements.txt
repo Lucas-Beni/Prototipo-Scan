@@ -19,3 +19,11 @@ Pillow
 python-dotenv
 requests
 werkzeug
+faiss-cpu
+flask
+flask-sqlalchemy
+numpy
+Pillow
+python-dotenv
+requests
+werkzeug
