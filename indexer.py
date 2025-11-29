@@ -117,62 +117,53 @@ class ImageIndexer:
             return {cat_id: 0.5 for cat_id in self.category_embeddings.keys()}
         
         try:
-            candidate_labels = []
-            cat_id_order = []
-            for cat_id, description in self.category_descriptions.items():
-                candidate_labels.append(description)
-                cat_id_order.append(cat_id)
+            labels = self.clip_service.get_image_labels(query_image)
             
-            print(f"[Indexer] Classificando imagem com zero-shot usando labels: {candidate_labels}")
-            
-            zero_shot_results = self.clip_service.zero_shot_classify(query_image, candidate_labels)
-            
-            scores = {}
-            if zero_shot_results:
-                print(f"[Indexer] Resultados zero-shot: {zero_shot_results}")
+            if labels:
+                print(f"[Indexer] Labels detectados na imagem: {[l.get('label', '') for l in labels[:5]]}")
                 
-                for cat_id, description in self.category_descriptions.items():
-                    if description in zero_shot_results:
-                        scores[cat_id] = zero_shot_results[description]
-                    else:
-                        scores[cat_id] = 0.5
+                labels_text = ", ".join([item.get('label', '') for item in labels[:5]])
+                print(f"[Indexer] Texto dos labels: {labels_text}")
                 
-                print(f"[Indexer] Scores de categoria por zero-shot: {scores}")
-                return scores
-            else:
-                print("[Indexer] Zero-shot falhou, tentando abordagem com caption...")
-                return self._compute_category_text_scores_fallback(query_image)
-                
-        except Exception as e:
-            print(f"[Indexer] Erro ao calcular scores de categoria: {e}")
-            return self._compute_category_text_scores_fallback(query_image)
-    
-    def _compute_category_text_scores_fallback(self, query_image) -> Dict[int, float]:
-        try:
-            caption = self.clip_service.generate_image_caption(query_image)
-            print(f"[Indexer] Caption da imagem de busca (fallback): {caption}")
-            
-            if caption:
-                caption_embedding = self.clip_service.generate_text_embedding(caption)
-                caption_embedding = caption_embedding / np.linalg.norm(caption_embedding)
+                labels_embedding = self.clip_service.generate_text_embedding(labels_text)
+                labels_embedding = labels_embedding / np.linalg.norm(labels_embedding)
                 
                 scores = {}
                 for cat_id, description in self.category_descriptions.items():
                     if cat_id in self.category_embeddings:
                         cat_embedding = self.category_embeddings[cat_id]
-                        similarity = float(np.dot(caption_embedding, cat_embedding))
+                        similarity = float(np.dot(labels_embedding, cat_embedding))
                         similarity = max(0.0, min(1.0, (similarity + 1) / 2))
                         scores[cat_id] = similarity
                     else:
                         scores[cat_id] = 0.5
                 
-                print(f"[Indexer] Scores de categoria por caption (fallback): {scores}")
+                density_analysis = self.clip_service.classify_density_from_labels(labels)
+                if density_analysis:
+                    print(f"[Indexer] Análise de densidade: {density_analysis}")
+                    
+                    for cat_id, description in self.category_descriptions.items():
+                        desc_lower = description.lower()
+                        if any(word in desc_lower for word in ['vazia', 'pouco', 'poucos', 'leve', 'empty', 'few', 'sparse']):
+                            bonus = density_analysis.get('low', 0) * 0.5
+                            scores[cat_id] = min(1.0, scores.get(cat_id, 0.5) + bonus)
+                            if density_analysis.get('high', 0) > density_analysis.get('low', 0):
+                                scores[cat_id] = max(0.1, scores.get(cat_id, 0.5) - 0.3)
+                        elif any(word in desc_lower for word in ['cheia', 'muita', 'muitos', 'pesado', 'full', 'many', 'dense', 'crowded']):
+                            bonus = density_analysis.get('high', 0) * 0.5
+                            scores[cat_id] = min(1.0, scores.get(cat_id, 0.5) + bonus)
+                            if density_analysis.get('low', 0) > density_analysis.get('high', 0):
+                                scores[cat_id] = max(0.1, scores.get(cat_id, 0.5) - 0.3)
+                
+                print(f"[Indexer] Scores de categoria ajustados: {scores}")
                 return scores
+            else:
+                print("[Indexer] Não foi possível obter labels, usando scores neutros")
+                return {cat_id: 0.5 for cat_id in self.category_embeddings.keys()}
+                
         except Exception as e:
-            print(f"[Indexer] Erro no fallback: {e}")
-        
-        print("[Indexer] Usando scores neutros como último recurso")
-        return {cat_id: 0.5 for cat_id in self.category_embeddings.keys()}
+            print(f"[Indexer] Erro ao calcular scores de categoria: {e}")
+            return {cat_id: 0.5 for cat_id in self.category_embeddings.keys()}
     
     def _initialize_category_embeddings(self, categories):
         print("[Indexer] Gerando embeddings das categorias com modelo multilíngue...")

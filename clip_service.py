@@ -15,13 +15,13 @@ TEXT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12
 TEXT_EMBEDDING_URL = f"https://router.huggingface.co/hf-inference/models/{TEXT_EMBEDDING_MODEL}"
 
 CLIP_MODEL = "openai/clip-vit-large-patch14"
-CLIP_URL = f"https://api-inference.huggingface.co/models/{CLIP_MODEL}"
+CLIP_URL = f"https://router.huggingface.co/hf-inference/models/{CLIP_MODEL}"
 
 BLIP_MODEL = "Salesforce/blip-image-captioning-base"
-BLIP_URL = f"https://api-inference.huggingface.co/models/{BLIP_MODEL}"
+BLIP_URL = f"https://router.huggingface.co/hf-inference/models/{BLIP_MODEL}"
 
 TRANSLATION_MODEL = "Helsinki-NLP/opus-mt-en-pt"
-TRANSLATION_URL = f"https://api-inference.huggingface.co/models/{TRANSLATION_MODEL}"
+TRANSLATION_URL = f"https://router.huggingface.co/hf-inference/models/{TRANSLATION_MODEL}"
 
 IMAGE_EMBEDDING_DIM = 768
 TEXT_EMBEDDING_DIM = 384
@@ -137,6 +137,57 @@ class CLIPService:
 
         except Exception as e:
             raise RuntimeError(f"Erro ao gerar embedding de imagem: {e}")
+    
+    def get_image_labels(self, image):
+        try:
+            img_bytes = self._prepare_image(image)
+            response = self._call_api_with_retry(VIT_URL, data=img_bytes)
+
+            if response.status_code != 200:
+                print(f"[CLIPService] Erro ao obter labels: {response.status_code}")
+                return []
+
+            data = response.json()
+            
+            if isinstance(data, list) and len(data) > 0:
+                if isinstance(data[0], dict) and 'label' in data[0]:
+                    labels = sorted(data[:10], key=lambda x: x.get('score', 0), reverse=True)
+                    return labels
+            return []
+        except Exception as e:
+            print(f"[CLIPService] Erro ao obter labels: {e}")
+            return []
+    
+    def classify_density_from_labels(self, labels):
+        if not labels:
+            return None
+        
+        low_density_keywords = ['empty', 'blank', 'clean', 'simple', 'minimal', 'sparse', 'few', 'plain', 'bare']
+        high_density_keywords = ['full', 'crowded', 'packed', 'complex', 'dense', 'many', 'multiple', 'busy', 'cluttered', 'circuit', 'electronic', 'components']
+        
+        low_score = 0.0
+        high_score = 0.0
+        
+        for item in labels:
+            label = item.get('label', '').lower()
+            score = item.get('score', 0)
+            
+            for keyword in low_density_keywords:
+                if keyword in label:
+                    low_score += score
+                    
+            for keyword in high_density_keywords:
+                if keyword in label:
+                    high_score += score
+        
+        print(f"[CLIPService] Análise de densidade - baixa: {low_score:.3f}, alta: {high_score:.3f}")
+        
+        if low_score > high_score:
+            return {'low': low_score, 'medium': 0.3, 'high': high_score}
+        elif high_score > low_score:
+            return {'low': low_score, 'medium': 0.3, 'high': high_score}
+        else:
+            return {'low': 0.33, 'medium': 0.34, 'high': 0.33}
 
     def generate_text_embedding(self, text):
         try:
