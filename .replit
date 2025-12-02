@@ -1,10 +1,7 @@
-modules = ["python-3.11", "web"]
+modules = ["web", "nodejs-20", "python-3.11"]
 [agent]
 expertMode = true
-
-[nix]
-channel = "stable-25_05"
-packages = ["freetype", "lcms2", "libimagequant", "libjpeg", "libjpeg_turbo", "libpng", "libtiff", "libwebp", "libxcrypt", "openjpeg", "tcl", "tk", "which", "zlib"]
+integrations = ["python_database:1.0.0", "javascript_websocket:1.0.0", "python_gemini:1.0.0"]
 
 [workflows]
 runButton = "Project"
@@ -16,37 +13,88 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "Web Server"
+args = "flask-server"
 
 [[workflows.workflow]]
-name = "Web Server"
+name = "flask-server"
 author = "agent"
-
-[workflows.workflow.metadata]
-outputType = "webview"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "python main.py"
+args = "python app.py"
 waitForPort = 5000
+
+[workflows.workflow.metadata]
+outputType = "webview"
 
 [[ports]]
 localPort = 5000
 externalPort = 80
 
 [[ports]]
-localPort = 36589
+localPort = 32775
 externalPort = 3000
 
 [[ports]]
-localPort = 37419
+localPort = 34221
+externalPort = 8099
+
+[[ports]]
+localPort = 35821
 externalPort = 3002
 
 [[ports]]
-localPort = 42319
+localPort = 36571
+externalPort = 6800
+
+[[ports]]
+localPort = 36667
+externalPort = 6000
+
+[[ports]]
+localPort = 39415
+externalPort = 5000
+
+[[ports]]
+localPort = 39857
+externalPort = 5173
+
+[[ports]]
+localPort = 40609
+externalPort = 8000
+
+[[ports]]
+localPort = 41483
+externalPort = 8080
+
+[[ports]]
+localPort = 42665
+externalPort = 3003
+
+[[ports]]
+localPort = 43565
 externalPort = 3001
+
+[[ports]]
+localPort = 44729
+externalPort = 9000
+
+[[ports]]
+localPort = 45623
+externalPort = 8081
+
+[[ports]]
+localPort = 46157
+externalPort = 8008
+
+[[ports]]
+localPort = 46557
+externalPort = 4200
+
+[nix]
+channel = "stable-25_05"
+packages = ["cargo", "freetype", "glibcLocales", "iana-etc", "lcms2", "libev", "libiconv", "libimagequant", "libjpeg", "libtiff", "libwebp", "libxcrypt", "openjpeg", "rustc", "tcl", "tk", "zlib"]
 
 [deployment]
 deploymentTarget = "autoscale"
-publicDir = "."
-run = ["python", "main.py"]
+run = ["gunicorn", "--bind=0.0.0.0:5000", "--reuse-port", "--workers=2", "app:application"]

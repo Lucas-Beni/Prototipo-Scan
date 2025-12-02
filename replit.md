@@ -1,151 +1,74 @@
-# Prototipo-Scan
+# MRX System - Gestão de Compras de Sucata Eletrônica
 
-## Project Overview
-Sistema de busca de imagens por similaridade usando CLIP (Contrastive Language-Image Pre-Training) e FAISS (Facebook AI Similarity Search), com suporte a categorização de imagens e interface visual completa.
+### Overview
+The MRX System is a comprehensive platform designed to manage electronic scrap purchases. Its primary purpose is to streamline procurement, enhance pricing control, and improve supplier management within the electronic scrap industry. Key capabilities include a star-based pricing system, a price authorization workflow for negotiations, and geolocation tracking for suppliers. The system also integrates an AI-powered PCB scanner for material classification, an AI chatbot for system interaction, and a financial achievement planning tool for administrators.
 
-## Funcionalidades
-- Interface visual para upload e busca de imagens
-- Sistema de categorias para classificação de imagens (ex: Leve, Médio, Pesado)
-- Cadastro de imagens associadas a categorias
-- Busca por similaridade retorna imagem + categoria
-- Carrega modelo CLIP ViT via HuggingFace API para geração de embeddings
-- Indexa automaticamente todas as imagens do banco de dados
-- Busca por similaridade de cosseno usando FAISS
-- Exibe a imagem encontrada com percentual de similaridade e categoria
+### User Preferences
+I want iterative development.
+I prefer detailed explanations.
+Ask before making major changes.
+Do not make changes to the folder `Z`.
+Do not make changes to the file `Y`.
 
-## Estrutura do Projeto
-```
-├── main.py               # Rotas da API Flask + servidor de arquivos
-├── models.py             # Modelos SQLAlchemy (Category, Image)
-├── clip_engine.py        # Geração de embeddings via HuggingFace API
-├── indexer.py            # Indexação FAISS e mapeamento de imagens
-├── utils.py              # Funções auxiliares
-├── images/               # Pasta com imagens cadastradas
-├── templates/
-│   ├── search.html       # Tela de busca de imagens
-│   ├── categories.html   # Tela de gerenciamento de categorias
-│   └── upload.html       # Tela de cadastro de imagens
-├── static/
-│   └── style.css         # Estilos da interface
-├── instance/
-│   └── prototipo_scan.db # Banco de dados SQLite
-├── requirements.txt      # Dependências Python
-└── replit.md             # Este arquivo
-```
+### System Architecture
 
-## Telas do Sistema
+#### UI/UX Decisions
+The frontend uses Vanilla JavaScript and Tailwind CSS, providing a modern, responsive interface with PWA capabilities via Service Workers. The design focuses on clarity and efficiency for managing materials, prices, and authorizations.
 
-### 1. Busca (/)
-- Upload de imagem por clique ou arrastar e soltar
-- Preview da imagem selecionada
-- Busca com um clique no botão
-- Exibição lado a lado: imagem enviada x imagem encontrada
-- Exibe categoria da imagem encontrada
-- Barra de similaridade com percentual
-- Estatísticas do sistema
+#### Technical Implementations
+The system is built on a Flask backend (Python 3.12) with SQLAlchemy for ORM and PostgreSQL (Neon-backed) as the database. Real-time notifications are managed via Socket.IO, and JWT handles authentication.
 
-### 2. Categorias (/categories)
-- Formulário para criar novas categorias
-- Lista de categorias cadastradas com contagem de imagens
-- Editar e excluir categorias
-- Exclusão em cascata (remove imagens associadas)
+#### Feature Specifications
+-   **Material Management**: Supports over 50 types of electronic scrap with detailed classification.
+-   **Star-Based Pricing**: Utilizes three fixed price tables (1★, 2★, 3★) linked to supplier quality, with specific prices per material.
+-   **Price Authorization Workflow**: Triggers an authorization request for negotiated prices exceeding standard star-level rates, including status tracking and percentage difference calculation.
+-   **Supplier Geolocalization**: Stores supplier location data, with new suppliers defaulting to 1★.
+-   **Supplier Tax ID Flexibility**: Supports both CPF (individual) and CNPJ (business) tax IDs with validation.
+-   **Freight Modality**: Includes FOB or CIF freight options in purchase requests.
+-   **Excel Import/Export**: Functionality for bulk import and export of materials and price tables.
+-   **Purchase Wizard**: A multi-step wizard for new purchases, integrating supplier selection, collection/delivery details, item scanning, value input, and authorization requests.
+-   **WMS (Warehouse Management System)**: Manages inventory lots with features like lot details viewing, direct search, null-safe user validations, and real-time status tracking.
+-   **PCB Scanner with OpenCV + Perplexity**: Implements intelligent electronic board scanning using OpenCV for local image analysis (component detection, density calculation) and Perplexity AI for generating user-friendly explanations. Classification (LOW/MEDIUM/HIGH grade) is based on component count and density analysis. Price suggestions are calculated based on grade and weight. The scanner and chatbot widgets are restricted to admin users only.
+-   **AI Chatbot with System Actions**: An enhanced AI assistant (floating widget) capable of executing system actions via natural language, such as creating suppliers, sending notifications, listing data, and generating summaries, with comprehensive database context provided by Perplexity AI.
+-   **Achievement Planning**: An admin-only feature for tracking financial goals across various categories, with CRUD operations, progress charts, and AI-powered recommendations.
+-   **Supplier Price Table Management**: Allows suppliers to submit and correct price tables, with an admin review interface for side-by-side comparison, inline editing, and bulk approval/rejection.
+-   **HR Module (RH)**: A comprehensive human resources module accessible at `/rh-admin.html` with the following features:
+    -   **User Management**: Full CRUD for employees with photo upload, profile assignment, contact information (phone, CPF), and status management.
+    -   **Commission System**: Percentage-based commission tracking tied to purchase solicitations (solicitações), with assignment of commission percentages per user.
+    -   **Commission Reports**: Detailed reporting with filtering by date range and user, showing total value of solicitations and calculated commissions.
+    -   **Export Functionality**: CSV and Excel export for commission reports using pandas/openpyxl.
+    -   **Audit Logging**: Complete audit trail for all HR operations using the existing AuditoriaLog system, tracking before/after changes.
+    -   **User Photo Uploads**: Photos stored in the database as binary data (`foto_data` column) for Railway compatibility, with validation for image types and size limits. The system uses BYTEA columns to persist photos across container restarts.
+-   **Supplier Visits Module (Visitas)**: A complete visit tracking system integrated into the suppliers page (`/fornecedores.html`) with the following features:
+    -   **Visit Registration**: Create visits with supplier name, contact info (name, email, phone), observations, and automatic GPS geolocation capture.
+    -   **Tab-Based Interface**: Toggle between "Fornecedores" and "Visitas" tabs within the same page.
+    -   **Status Workflow**: Three states - pendente (pending), nao_fechado (not closed), negociacao_fechada (deal closed).
+    -   **Visit Cards**: Visual display of all visits with status badges, contact info preview, and action buttons.
+    -   **Detail Modal**: Full visit details including Google Maps link for GPS coordinates.
+    -   **Continuity Flow**: When marking a visit as "negociação fechada", the system pre-fills the supplier registration form with the visit's contact data.
 
-### 3. Cadastrar Imagens (/upload)
-- Seleção de categoria obrigatória
-- Upload de imagem com preview
-- Filtro de imagens por categoria
-- Grid de imagens cadastradas
-- Exclusão individual de imagens
+#### System Design Choices
+-   **Database Models**: Key models include `MaterialBase`, `TabelaPreco`, `TabelaPrecoItem`, `SolicitacaoAutorizacaoPreco`, `Fornecedor` (extended with `tipo_documento`, `cpf`, `cnpj`), `Solicitacao` (with `modalidade_frete`), `ScannerConfig`, `ScannerAnalysis`, `Conquista`, `AporteConquista`, `Usuario` (extended with `foto_path`, `percentual_comissao`, `telefone`, `cpf`, `data_atualizacao` for HR module), and `VisitaFornecedor` (with GPS coordinates, contact info, status workflow, and foreign keys to Usuario and Fornecedor).
+-   **API Endpoints**: Structured RESTful APIs for managing materials, price tables, authorizations, suppliers, purchases, and the AI scanner, including CRUD, bulk updates, and Excel integrations. Specific endpoints for CEP lookup and AI assistant actions are also present.
+-   **Security**: Employs JWT for authentication, role-based authorization (`@admin_required`), robust input validation (e.g., prices, weights, CPF/CNPJ format/uniqueness), and database integrity checks.
+-   **Seed Data**: An idempotent seed script initializes essential system data.
+-   **Database Migrations**: Handles schema changes including additions for CPF/CNPJ support and freight modality tracking.
 
-## Endpoints da API
+### External Dependencies
 
-### Páginas
-- `GET /` - Tela de busca de imagens
-- `GET /categories` - Tela de gerenciamento de categorias
-- `GET /upload` - Tela de cadastro de imagens
+#### Backend
+-   Flask
+-   Flask-SQLAlchemy
+-   Flask-JWT-Extended
+-   Flask-SocketIO
+-   psycopg2-binary
+-   pandas
+-   openpyxl
+-   OpenCV (opencv-python-headless)
+-   NumPy
+-   Perplexity AI API (for text explanations)
 
-### API de Categorias
-- `GET /api/categories` - Lista todas as categorias
-- `POST /api/categories` - Cria nova categoria
-- `GET /api/categories/<id>` - Retorna categoria específica
-- `PUT /api/categories/<id>` - Atualiza categoria
-- `DELETE /api/categories/<id>` - Exclui categoria
-
-### API de Imagens
-- `GET /api/images` - Lista imagens (opcional: ?category_id=X)
-- `POST /api/images` - Upload de imagem com categoria
-- `DELETE /api/images/<id>` - Exclui imagem
-
-### Busca
-- `POST /search` - Busca imagem similar
-
-**Resposta:**
-```json
-{
-  "match_image": "uuid_nome_do_arquivo.jpg",
-  "original_filename": "nome_original.jpg",
-  "similarity": 0.85,
-  "percentage": 85,
-  "category": {
-    "id": 1,
-    "name": "Pesado",
-    "description": "Categoria para itens pesados"
-  }
-}
-```
-
-### Utilitários
-- `GET /api/stats` - Estatísticas do sistema
-- `GET /health` - Health check
-- `POST /reindex` - Força reindexação
-
-## Como Usar
-
-### Fluxo Recomendado
-1. Acesse `/categories` e crie as categorias desejadas
-2. Acesse `/upload` e cadastre imagens associando-as às categorias
-3. Acesse `/` para buscar imagens por similaridade
-
-### Via API (curl)
-```bash
-# Criar categoria
-curl -X POST -H "Content-Type: application/json" \
-  -d '{"name": "Pesado", "description": "Itens pesados"}' \
-  http://localhost:5000/api/categories
-
-# Upload de imagem
-curl -X POST -F "image=@sua_imagem.jpg" -F "category_id=1" \
-  http://localhost:5000/api/images
-
-# Buscar imagem similar
-curl -X POST -F "image=@imagem_busca.jpg" \
-  http://localhost:5000/search
-```
-
-## Tecnologias
-- Python 3.11
-- Flask + Flask-SQLAlchemy
-- SQLite (banco de dados)
-- HuggingFace Inference API (embeddings de imagens)
-- FAISS (busca por similaridade vetorial)
-- Pillow (processamento de imagens)
-- HTML5/CSS3/JavaScript (interface visual)
-
-## Variáveis de Ambiente
-- `HF_API_KEY` - Chave de API do HuggingFace (obrigatória)
-
-## Notas Técnicas
-- Os embeddings são gerados via HuggingFace Inference API (modelo google/vit-base-patch16-224)
-- Os embeddings são normalizados para uso com similaridade de cosseno
-- FAISS usa IndexFlatIP (Inner Product) com vetores normalizados
-- Banco de dados SQLite para persistência de categorias e metadados de imagens
-- Cache desabilitado para desenvolvimento
-- Imagens são armazenadas com UUID para evitar conflitos de nomes
-
-## Recent Changes
-- **29/Nov/2025**: Adicionado sistema de categorias e cadastro de imagens
-  - Nova tela de gerenciamento de categorias
-  - Nova tela de cadastro de imagens com associação a categorias
-  - Busca agora retorna a categoria da imagem encontrada
-  - Banco de dados SQLite para persistência
-  - Navegação entre as três telas
+#### Frontend
+-   Tailwind CSS
+-   Chart.js
+-   Socket.IO Client
